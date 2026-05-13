@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cuvis-ai-augment"
-version = "0.1.0"
+version = "0.1.1"
 description = "Data-augmentation node for cuvis.ai hyperspectral training pipelines."
 readme = "README.md"
 requires-python = ">=3.11"
