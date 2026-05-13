@@ -1,0 +1,6 @@
+# Local plugin manifest (path relative to this file). See cuvis-ai plugin-system docs.
+plugins:
+  augment:
+    path: ".."
+    provides:
+      - cuvis_ai_augment.node.compose.AugmentationCompose

@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cuvis-ai-augment"
+version = "0.1.0"
+description = "Data-augmentation node for cuvis.ai hyperspectral training pipelines."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+    { name = "Cubert GmbH, Ulm, Germany", email = "cuvis.ai@cubert-gmbh.com" },
+]
+dependencies = [
+    # Mirrors sibling plugins (dinomaly, sam3, deepeiou): depend only on cuvis-ai-core
+    # + cuvis-ai-schemas, never the high-level `cuvis-ai` package (which eagerly imports
+    # the proprietary Cuvis SDK at module load).
+    "cuvis-ai-core>=0.1.0",
+    "cuvis-ai-schemas>=0.4.0",
+    "torch>=2.1",
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "pip-audit>=2.7.0",
+    "detect-secrets>=1.4.0",
+    "bandit[toml]>=1.7.5",
+    "matplotlib>=3.7.0",  # for notebooks/visual_check.ipynb
+]
+# Reserved for v0.2.0+: continuous-angle rotation, affine/perspective warps.
+kornia = ["kornia>=0.7.3"]
+
+[project.urls]
+Homepage = "https://www.cubert-hyperspectral.com/"
+Repository = "https://github.com/cubert-hyperspectral/cuvis-ai-augment"
+
+[tool.setuptools.packages.find]
+include = ["cuvis_ai_augment*"]
+
+[tool.uv.sources]
+# Local editable overrides for internal development only.
+# Release installs from Git tags / manifests resolve dependencies from normal indexes.
+# NOTE: uv.lock is generated with --no-sources; CI uses --locked --no-sources.
+torch = { index = "pytorch-cu128" }
+cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core-sam3", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4"]
+extend-select = ["ANN201", "ANN202", "ANN204"]
+ignore = ["ANN401", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN201", "ANN202", "ANN204"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "slow: heavy or downloads weights",
+    "integration: full stack / manifest loading",
+]
+
+[tool.coverage.run]
+source = ["cuvis_ai_augment"]
+branch = true
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+
+[tool.bandit]
+exclude_dirs = ["tests", "examples", ".venv"]
+skips = ["B101"]
