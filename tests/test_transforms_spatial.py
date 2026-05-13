@@ -134,6 +134,28 @@ class TestRandom90Rotate:
         with pytest.raises(ValueError, match="square spatial dims"):
             Random90Rotate(prob=1.0)(cube, mask, _rng(seed=0))
 
+    def test_non_square_with_even_k_works(self, make_cube):
+        """k=2 (180°) preserves H/W layout, so it must work on non-square cubes —
+        the square requirement only applies when k is odd. This pins the negative
+        assertion so a future tightening of the check fails the build."""
+        # Force k=2 by directly patching torch.randint via a fixed-output rng.
+        # We can't easily force k from outside, so instead we verify many seeds
+        # against a non-square cube and confirm every successful run that survives
+        # produces output of the same shape as input — i.e. either k=2 succeeds
+        # silently or the implementation raised because the seed picked k∈{1,3}.
+        cube, mask = make_cube(height=8, width=16)
+        successes = 0
+        for seed in range(20):
+            try:
+                out_cube, out_mask = Random90Rotate(prob=1.0)(cube, mask, _rng(seed=seed))
+            except ValueError:
+                continue
+            assert out_cube.shape == cube.shape
+            assert out_mask.shape == mask.shape
+            successes += 1
+        # k is uniform over {1, 2, 3}; over 20 seeds we'd expect ~6-7 even k draws.
+        assert successes >= 1, "Expected at least one even-k rotation to succeed."
+
 
 class TestRandomSpatialCrop:
     def test_output_shape(self, make_cube):
@@ -169,6 +191,29 @@ class TestRandomSpatialCrop:
         cube, mask = make_cube(height=8, width=8)
         with pytest.raises(ValueError, match="exceeds cube spatial dims"):
             RandomSpatialCrop(size=(16, 16))(cube, mask, _rng())
+
+    def test_bad_size_param_raises(self):
+        # Wrong arity.
+        with pytest.raises(ValueError, match="size must be a pair"):
+            RandomSpatialCrop(size=[16])  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="size must be a pair"):
+            RandomSpatialCrop(size=[16, 16, 16])  # type: ignore[arg-type]
+        # Non-positive entry.
+        with pytest.raises(ValueError, match="size must be a pair"):
+            RandomSpatialCrop(size=(0, 16))
+        with pytest.raises(ValueError, match="size must be a pair"):
+            RandomSpatialCrop(size=(16, -1))
+
+    def test_crop_equal_to_cube_dims(self, make_cube):
+        """When size == cube spatial dims, max_top and max_left are 0 — the
+        zero-margin branch in RandomSpatialCrop. Output must equal input regardless
+        of prob (no offset to randomise)."""
+        cube, mask = make_cube(batch_size=2, height=8, width=8, channels=4)
+        for prob in (0.0, 1.0):
+            t = RandomSpatialCrop(size=(8, 8), prob=prob)
+            out_cube, out_mask = t(cube, mask, _rng())
+            assert torch.equal(out_cube, cube)
+            assert torch.equal(out_mask, mask)
 
 
 class TestStatisticalApply:
