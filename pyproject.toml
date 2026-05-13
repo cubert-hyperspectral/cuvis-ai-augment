@@ -31,7 +31,16 @@ dev = [
     "pip-audit>=2.7.0",
     "detect-secrets>=1.4.0",
     "bandit[toml]>=1.7.5",
-    "matplotlib>=3.7.0",  # for notebooks/visual_check.ipynb
+]
+# Everything the tutorial notebook needs. Installed separately from `dev` so that
+# `uv sync --extra dev` stays lean for CI's test/lint/typecheck jobs while
+# `uv sync --extra notebooks` (or both) pulls jupyter + huggingface_hub when you
+# want to run notebooks/use_cases/lentils_augmentation.ipynb end-to-end.
+notebooks = [
+    "huggingface_hub>=0.24.0",
+    "matplotlib>=3.7.0",
+    "jupyter>=1.0.0",
+    "nbconvert>=7.0.0",
 ]
 # Reserved for v0.2.0+: continuous-angle rotation, affine/perspective warps.
 kornia = ["kornia>=0.7.3"]
