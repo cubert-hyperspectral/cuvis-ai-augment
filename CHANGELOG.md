@@ -5,6 +5,8 @@ loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.1.1 - 2026-05-13
+
 ### Added
 - Tutorial notebook `notebooks/use_cases/lentils_augmentation.ipynb`: HuggingFace `cubert-gmbh/XMR_Demo_Industrial_Foreign_Object_Detection_Lentils` dataset loader, per-transform deep dives with 3-band (low / mid / high) visualisations to prove channel-axis independence, end-to-end runnable in Colab.
 - Optional dependency group `notebooks` (`huggingface_hub`, `matplotlib`, `jupyter`) so users can `uv sync --extra notebooks` for the tutorial without pulling notebook tooling into the runtime install.
