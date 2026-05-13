@@ -70,6 +70,9 @@ ignore = ["ANN401", "E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# Add repo root to sys.path so `tests.fixtures.fake_transform` is importable
+# by tests that exercise extra_transform_modules.
+pythonpath = ["."]
 markers = [
     "slow: heavy or downloads weights",
     "integration: full stack / manifest loading",
