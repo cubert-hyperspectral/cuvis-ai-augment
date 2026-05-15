@@ -10,8 +10,14 @@ Data-augmentation node for [cuvis.ai](https://www.cubert-hyperspectral.com/) hyp
 training pipelines.
 
 This plugin provides a single `AugmentationCompose` node that applies a configurable list
-of stochastic spatial transforms to hyperspectral cubes (and their paired masks) during
-training. It is automatically a no-op at val/test/inference via `execution_stages`.
+of stochastic transforms to hyperspectral cubes (and their paired masks) during training.
+It is automatically a no-op at val/test/inference via `execution_stages`.
+
+**v0.2.0 adds three new transform families** — spectral (`GaussianBandNoise`,
+`RandomBandDropout`), photometric (`MultiplicativeIlluminationScaling`), and mixing
+(`Cutout`) — drawn from the HSI augmentation literature (Nalepa et al. 2019;
+Ahmad et al. 2024; Roddan et al. 2024). All transforms are pure-torch and HSI-aware,
+preserving spectral signatures and paired masks by construction.
 
 ## Tutorial
 
@@ -35,7 +41,7 @@ uv sync --extra dev --extra notebooks  # add the tutorial notebook extras
 Or, from another cuvis-ai project, install from a tagged release:
 
 ```bash
-uv add "git+https://github.com/cubert-hyperspectral/cuvis-ai-augment@v0.1.0"
+uv add "git+https://github.com/cubert-hyperspectral/cuvis-ai-augment@v0.2.0"
 ```
 
 ## Usage (pipeline YAML)
@@ -77,10 +83,13 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 | `transforms` | `list[dict]` | `[]` | Ordered list of `{type: <Name>, **kwargs}` specs from `TRANSFORM_REGISTRY`. |
 | `seed` | `int | None` | `None` | Seeds the shared `torch.Generator`. `None` is non-deterministic. |
 | `extra_transform_modules` | `list[str]` | `[]` | Import these module paths before resolving names — for external transform packages. |
+| `wavelengths` | `list[float] | None` | `None` | Optional per-band centre wavelengths in nm. Threaded through to each transform's `__call__`. Wavelength-agnostic transforms ignore it; reserved for v0.3.0+ wavelength-aware transforms. |
 
 **Execution:** `execution_stages = {ExecutionStage.TRAIN}` — automatic no-op outside training.
 
-## Available transforms (v0.1.0)
+## Available transforms (v0.2.0)
+
+### Spatial (`cuvis_ai_augment.transforms.spatial`)
 
 | Name | Operation |
 |---|---|
@@ -89,13 +98,43 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 | `Random90Rotate`       | Rotate by random multiple of 90° (0/90/180/270) per sample. Requires `H == W` when any sample's k is odd. |
 | `RandomSpatialCrop`    | Crop to fixed `(H_out, W_out)` at random offset per sample (centre crop when `prob<1`). |
 
+### Spectral (`cuvis_ai_augment.transforms.spectral`) — new in v0.2.0
+
+| Name | Operation |
+|---|---|
+| `GaussianBandNoise` | Add per-band Gaussian noise `N(0, σ²)`. Optional `per_band_scale` makes σ track each band's std. |
+| `RandomBandDropout` | Zero out a random subset of bands per sample (`drop_fraction` of `C`). Spectral regulariser. |
+
+### Photometric (`cuvis_ai_augment.transforms.photometric`) — new in v0.2.0
+
+| Name | Operation |
+|---|---|
+| `MultiplicativeIlluminationScaling` | Multiply each band by a smooth random gain curve `g(λ) ∈ gain_range`. Models lamp drift / illumination variation without breaking spectral ratios. |
+
+### Mixing (`cuvis_ai_augment.transforms.mixing`) — new in v0.2.0
+
+| Name | Operation |
+|---|---|
+| `Cutout` | Zero a random rectangular spatial patch in both cube and mask. `mask_fill_value` (default `0`) lets you target your loss's ignore label. |
+
 Discover programmatically:
 
 ```python
 from cuvis_ai_augment.node.compose import AugmentationCompose
 AugmentationCompose.available_transforms()
-# ['Random90Rotate', 'RandomHorizontalFlip', 'RandomSpatialCrop', 'RandomVerticalFlip']
+# ['Cutout', 'GaussianBandNoise', 'MultiplicativeIlluminationScaling',
+#  'Random90Rotate', 'RandomBandDropout', 'RandomHorizontalFlip',
+#  'RandomSpatialCrop', 'RandomVerticalFlip']
 ```
+
+### References
+
+The new families are drawn from the HSI augmentation literature:
+
+- Nalepa, Myller, Kawulok — *Hyperspectral Data Augmentation*, IEEE TGRS (2019) — [arXiv:1903.05580](https://arxiv.org/abs/1903.05580)
+- Ahmad et al. — *A Comprehensive Survey for HSI Classification* (2024) — [arXiv:2404.14955](https://arxiv.org/abs/2404.14955)
+- Roddan et al. — *Calibration-Jitter*, Healthcare Technology Letters (2024) — [pmc.ncbi.nlm.nih.gov/articles/PMC11665780](https://pmc.ncbi.nlm.nih.gov/articles/PMC11665780/)
+- DeVries & Taylor — *Improved Regularization of CNNs with Cutout* (2017) — [arXiv:1708.04552](https://arxiv.org/abs/1708.04552)
 
 ## Extending with new transforms
 
@@ -107,13 +146,19 @@ from cuvis_ai_augment.transforms.base import Transform, register
 
 @register("MyTransform")
 class MyTransform(Transform):
-    def __call__(self, cube, mask, rng):
+    def __call__(self, cube, mask, rng, wavelengths=None):
         ...
         return cube, mask
 ```
 
 Then import the module in `cuvis_ai_augment/transforms/__init__.py` so the decorator runs
-on plugin import.
+on plugin import. The transforms are split by family (`spatial.py`, `spectral.py`,
+`photometric.py`, `mixing.py`) — add your transform to the file that matches its operation,
+or create a new family file.
+
+The `wavelengths` argument is optional and defaults to `None`. Wavelength-agnostic
+transforms can keep their signature simple (`del wavelengths` at the top); wavelength-aware
+transforms (planned for v0.3.0+) read per-band centre wavelengths in nanometres.
 
 ### From an external package
 Decorate your transforms the same way, then list your module path in
@@ -148,7 +193,7 @@ For releases, pin a git tag:
 plugins:
   augment:
     repo: "https://github.com/cubert-hyperspectral/cuvis-ai-augment.git"
-    tag: "v0.1.0"
+    tag: "v0.2.0"
     provides:
       - cuvis_ai_augment.node.compose.AugmentationCompose
 ```
@@ -157,7 +202,8 @@ plugins:
 
 | `cuvis-ai-augment` | `cuvis-ai-core` | `torch` | `numpy` |
 |---|---|---|---|
-| `0.1.0` | `>=0.1.0` (tested against 0.5.2) | `>=2.1` | `>=1.20.0` |
+| `0.2.0` | `>=0.1.0` (tested against 0.5.2) | `>=2.1` | `>=1.20.0` |
+| `0.1.x` | `>=0.1.0` (tested against 0.5.2) | `>=2.1` | `>=1.20.0` |
 
 The tagged-manifest model is verified at release time by cloning the published tag fresh
 and loading it via `NodeRegistry.load_plugins()` — see the release checklist in
@@ -167,7 +213,7 @@ and loading it via `NodeRegistry.load_plugins()` — see the release checklist i
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/ -q                                   # 48 tests
+uv run pytest tests/ -q                                   # 90 tests
 uv run pytest tests/ --cov=cuvis_ai_augment              # coverage report
 uv run ruff format --check cuvis_ai_augment tests
 uv run ruff check cuvis_ai_augment tests

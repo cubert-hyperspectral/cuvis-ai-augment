@@ -7,7 +7,13 @@ We welcome contributions — bug reports, fixes, new transforms, docs.
 1. Fork the repo and create a feature branch from `main` — never push directly to `main`.
 2. If you've added code that should be tested, add tests.
 3. If you've added a new transform, register it via `@register("Name")` and import the
-   module in `cuvis_ai_augment/transforms/__init__.py`.
+   module in `cuvis_ai_augment/transforms/__init__.py`. Pick the family file that
+   matches the transform's operation — `spatial.py` (geometric ops on H/W),
+   `spectral.py` (perturbations on the C axis), `photometric.py` (per-band intensity
+   modulation), or `mixing.py` (erasure / blending). If none fit, add a new family
+   file and import it from `__init__.py`. Your `__call__` signature must accept the
+   optional `wavelengths: list[float] | None = None` argument (use `del wavelengths`
+   if you don't consume it).
 4. Make sure CI is green locally:
 
    ```bash

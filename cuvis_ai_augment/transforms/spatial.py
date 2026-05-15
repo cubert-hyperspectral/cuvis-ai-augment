@@ -52,7 +52,9 @@ class RandomHorizontalFlip(Transform):
         cube: Tensor,
         mask: Tensor | None,
         rng: torch.Generator,
+        wavelengths: list[float] | None = None,
     ) -> tuple[Tensor, Tensor | None]:
+        del wavelengths  # wavelength-agnostic
         self._validate_shapes(cube, mask)
         apply = self._draw_apply_mask(cube.shape[0], rng, cube.device)
         cube_out = _apply_flip_per_sample(cube, apply, dim=2)
@@ -76,7 +78,9 @@ class RandomVerticalFlip(Transform):
         cube: Tensor,
         mask: Tensor | None,
         rng: torch.Generator,
+        wavelengths: list[float] | None = None,
     ) -> tuple[Tensor, Tensor | None]:
+        del wavelengths  # wavelength-agnostic
         self._validate_shapes(cube, mask)
         apply = self._draw_apply_mask(cube.shape[0], rng, cube.device)
         cube_out = _apply_flip_per_sample(cube, apply, dim=1)
@@ -112,7 +116,9 @@ class Random90Rotate(Transform):
         cube: Tensor,
         mask: Tensor | None,
         rng: torch.Generator,
+        wavelengths: list[float] | None = None,
     ) -> tuple[Tensor, Tensor | None]:
+        del wavelengths  # wavelength-agnostic
         self._validate_shapes(cube, mask)
         B, H, W, _ = cube.shape
         device = cube.device
@@ -179,7 +185,9 @@ class RandomSpatialCrop(Transform):
         cube: Tensor,
         mask: Tensor | None,
         rng: torch.Generator,
+        wavelengths: list[float] | None = None,
     ) -> tuple[Tensor, Tensor | None]:
+        del wavelengths  # wavelength-agnostic
         self._validate_shapes(cube, mask)
         B, H, W, C = cube.shape
         H_out, W_out = self.size

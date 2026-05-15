@@ -50,6 +50,12 @@ class AugmentationCompose(Node):
         ``transforms``. Lets external packages contribute transforms via the same
         ``@register`` decorator without modifying this plugin.
 
+    wavelengths : list[float] or None
+        Optional per-band centre wavelengths in nanometres, length must equal ``C`` of
+        the cube. Threaded through to every transform's ``__call__``. Wavelength-aware
+        transforms (v0.3.0+) consume it; the v0.2.0 transforms ignore it. Set this
+        once per pipeline — it's assumed constant across batches.
+
     Notes
     -----
     The node accepts an optional ``mask`` port. When the mask is connected, each
@@ -93,16 +99,21 @@ class AugmentationCompose(Node):
         transforms: list[dict[str, Any]] | None = None,
         seed: int | None = None,
         extra_transform_modules: list[str] | None = None,
+        wavelengths: list[float] | None = None,
         **kwargs: Any,
     ) -> None:
         self.transforms_spec: list[dict[str, Any]] = list(transforms or [])
         self.seed = seed
         self.extra_transform_modules: list[str] = list(extra_transform_modules or [])
+        self.wavelengths: list[float] | None = (
+            [float(w) for w in wavelengths] if wavelengths is not None else None
+        )
 
         super().__init__(
             transforms=self.transforms_spec,
             seed=seed,
             extra_transform_modules=self.extra_transform_modules,
+            wavelengths=self.wavelengths,
             **kwargs,
         )
 
@@ -137,7 +148,7 @@ class AugmentationCompose(Node):
         **_: Any,
     ) -> dict[str, Tensor | None]:
         for transform in self._transforms:
-            cube, mask = transform(cube, mask, self._rng)
+            cube, mask = transform(cube, mask, self._rng, wavelengths=self.wavelengths)
         out: dict[str, Tensor | None] = {"cube": cube}
         if mask is not None:
             out["mask"] = mask
