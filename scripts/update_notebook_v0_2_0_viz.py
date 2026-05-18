@@ -8,7 +8,6 @@ Run from the repo root:
 """
 
 import json
-import sys
 from pathlib import Path
 
 NB_PATH = Path("notebooks/use_cases/lentils_augmentation.ipynb")

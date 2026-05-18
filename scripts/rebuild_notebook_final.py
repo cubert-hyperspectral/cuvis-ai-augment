@@ -4,6 +4,7 @@ Run from the repo root:  python scripts/rebuild_notebook_final.py
 """
 
 from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -44,7 +45,8 @@ def _src(idx: int) -> str:
 cells = []
 
 # ── Cell 0 · Title ──────────────────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 # Hyperspectral data augmentation with `cuvis-ai-augment`
 
 End-to-end tutorial for the **eight transforms across four families** shipped in
@@ -66,7 +68,8 @@ without touching spatial structure.
 
 All transforms operate on `(B, H, W, C)` float32 cubes and `(B, H, W)` int32 masks — \
 the same random decision drives cube and mask in lockstep.\
-"""))
+""")
+)
 
 # ── Cell 1 · Prerequisites ───────────────────────────────────────────────────
 cells.append(md(_src(1)))
@@ -81,7 +84,8 @@ cells.append(code(_src(3)))
 cells.append(code(_src(4)))
 
 # ── Cell 5 · §2 Load the lentils cube header ────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 2 · Load the lentils cube
 
 The cube is loaded in **calibrated reflectance** using the CUVIS SDK:
@@ -99,13 +103,15 @@ The notebook tries three data sources in order so it runs anywhere:
 2. **Local path** — edit `LOCAL_CANDIDATES` to point at a local `.cu3s` file.
 3. **Synthetic fallback** — a small random cube so the notebook still runs
    without any data files (geometry checks still pass; spectral plots are noise).\
-"""))
+""")
+)
 
 # ── Cell 6 · Cube loading code ──────────────────────────────────────────────
 cells.append(code(_src(6)))
 
 # ── Cell 7 · §3 Helpers header ──────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 3 · Three-band visualisation helpers
 
 Hyperspectral cubes have 61 bands — far too many to show at once. \
@@ -116,20 +122,25 @@ grayscale panels with the mask overlaid in red.
 Using **three independent band panels** rather than one false-colour composite \
 catches axis-swap bugs: if a transform accidentally applied different geometry \
 to band 5 vs band 30, the two panels would disagree — impossible to miss.\
-"""))
+""")
+)
 
 # ── Cell 8 · Helper functions ────────────────────────────────────────────────
 # Keep only the clean helpers; drop show_augmentation_detail
-helpers_src = _src(8)  # _pick_3bands, to_uint8_band, overlay_mask, show_before_after_3bands, run_single_transform
+helpers_src = _src(
+    8
+)  # _pick_3bands, to_uint8_band, overlay_mask, show_before_after_3bands, run_single_transform
 cells.append(code(helpers_src))
 
 # ── Cell 9 · §3 Original cube ────────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ### Original cube — three bands with mask overlay
 
 Reference panel. The mask (red overlay) marks foreign-object pixels. \
 Keep this in mind when comparing the augmented outputs below.\
-"""))
+""")
+)
 
 # ── Cell 10 · Original cube plot ────────────────────────────────────────────
 cells.append(code(_src(11)))
@@ -137,45 +148,54 @@ cells.append(code(_src(11)))
 # ── §4–§7  Spatial transforms (keep existing cells verbatim) ────────────────
 
 # Cell 11 · §4 RandomHorizontalFlip md
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 4 · `RandomHorizontalFlip` (spatial)
 
 Mirrors the **width axis** left ↔ right. \
 The disc in the mask moves to the horizontally mirrored position; \
 all 61 band panels agree on the flip direction.\
-"""))
+""")
+)
 cells.append(code(_src(13)))  # Cell 12
 
 # Cell 13 · §5 RandomVerticalFlip
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 5 · `RandomVerticalFlip` (spatial)
 
 Mirrors the **height axis** top ↔ bottom. \
 The same vertical flip appears identically in every band.\
-"""))
+""")
+)
 cells.append(code(_src(15)))  # Cell 14
 
 # Cell 15 · §6 Random90Rotate
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 6 · `Random90Rotate` (spatial)
 
 Rotates by a random multiple of 90° (k ∈ {1, 2, 3}) drawn per sample. \
 Three seeds below show k=1, k=2, and k=3 so you can verify all three cases.\
-"""))
+""")
+)
 cells.append(code(_src(17)))  # Cell 16
 
 # Cell 17 · §7 RandomSpatialCrop
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 7 · `RandomSpatialCrop` (spatial)
 
 Crops to a fixed `(H_out, W_out)` at a per-sample random offset, \
 returning a smaller cube with the mask aligned. \
 The crop below uses half the original spatial dimensions.\
-"""))
+""")
+)
 cells.append(code(_src(19)))  # Cell 18
 
 # ── §8 GaussianBandNoise ─────────────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 8 · `GaussianBandNoise` (spectral)
 
 Adds independent Gaussian noise `N(0, σ²)` to every `(pixel, band)` location.
@@ -192,9 +212,11 @@ reflectance values and is forced to learn spectral *shape* rather than magnitude
 > The right panel below verifies numerically that the correct noise level was applied.
 
 > Reference: Nalepa et al. 2019 (TGRS); Ahmad et al. 2024 §4.2.\
-"""))
+""")
+)
 
-cells.append(code("""\
+cells.append(
+    code("""\
 import numpy as np
 
 out_gn = run_single_transform(
@@ -236,10 +258,12 @@ ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.show()
-"""))
+""")
+)
 
 # ── §9 RandomBandDropout ─────────────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 9 · `RandomBandDropout` (spectral)
 
 Zeros a random `drop_fraction` of bands per sample. With 61 bands and
@@ -256,9 +280,11 @@ a completely black "after" image. The bar chart identifies the exact dropped
 band indices for this run.
 
 > Reference: Ahmad et al. 2024 §4.3.\
-"""))
+""")
+)
 
-cells.append(code("""\
+cells.append(
+    code("""\
 import numpy as np
 
 out_bd = run_single_transform(
@@ -288,10 +314,12 @@ ax.legend(fontsize=8)
 ax.grid(True, axis="y", alpha=0.3)
 plt.tight_layout()
 plt.show()
-"""))
+""")
+)
 
 # ── §10 MultiplicativeIlluminationScaling ────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 10 · `MultiplicativeIlluminationScaling` (photometric)
 
 Multiplies the whole cube by a smooth random gain curve `g(λ) ∈ gain_range`.
@@ -305,9 +333,11 @@ The right panel below recovers the applied gain curve from the spatial means,
 showing the characteristic smooth shape.
 
 > Reference: Roddan et al. 2024 (Calibration-Jitter, simplified); Nalepa 2019 §III-A.\
-"""))
+""")
+)
 
-cells.append(code("""\
+cells.append(
+    code("""\
 import numpy as np
 
 out_il = run_single_transform(
@@ -352,10 +382,12 @@ ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.show()
-"""))
+""")
+)
 
 # ── §11 Cutout ────────────────────────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 11 · `Cutout` (mixing / erasing)
 
 Zeros a random rectangular patch in the spatial dimensions simultaneously across
@@ -371,18 +403,22 @@ only on fully-visible lentils will be surprised when a seed is partially occlude
 Cutout makes partial observations routine.
 
 > Reference: DeVries & Taylor 2017; Haut et al. 2019 (HSI adaptation).\
-"""))
+""")
+)
 
-cells.append(code("""\
+cells.append(
+    code("""\
 patch_h = min(cube.shape[1], cube.shape[2]) // 4
 _ = run_single_transform(
     {"type": "Cutout", "patch_size": [patch_h, patch_h], "mask_fill_value": 0, "prob": 1.0},
     title=f"Cutout (patch {patch_h}×{patch_h} px) — black rectangle same position in all bands",
 )
-"""))
+""")
+)
 
 # ── §12 Full AugmentationCompose ─────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 12 · Full `AugmentationCompose`
 
 All seven concrete transforms chained — one from each family — with `prob < 1.0` so
@@ -399,7 +435,8 @@ transforms:
   - {type: Cutout, patch_size: [16, 16],   prob: 0.5}
   - {type: RandomSpatialCrop, size: [out_side, out_side], prob: 1.0}
 ```\
-"""))
+""")
+)
 
 cells.append(code(_src(29)))  # Full compose code cell
 
@@ -409,7 +446,8 @@ cells.append(md(_src(30)))
 cells.append(code(_src(31)))
 
 # ── §14 Takeaways ────────────────────────────────────────────────────────────
-cells.append(md("""\
+cells.append(
+    md("""\
 ## 13 · Takeaways
 
 - **`execution_stages={TRAIN}`** — `AugmentationCompose` is a no-op outside training.
@@ -431,7 +469,8 @@ cells.append(md("""\
 - **Mask fill values** — `Cutout`'s `mask_fill_value` should match the ignore-label
   used in your downstream loss (e.g. `255` for cross-entropy ignore or `-1` for some
   segmentation frameworks).
-"""))
+""")
+)
 
 # ---------------------------------------------------------------------------
 # Write the new notebook
@@ -449,4 +488,4 @@ with open(NB_PATH, "w", encoding="utf-8") as f:
 print(f"Written {NB_PATH}  —  {len(cells)} cells")
 for i, c in enumerate(cells):
     src = c["source"] if isinstance(c["source"], str) else "".join(c["source"])
-    print(f"  [{i:2d}] {c['cell_type'][:4]}  {src[:80].replace(chr(10),' | ')}")
+    print(f"  [{i:2d}] {c['cell_type'][:4]}  {src[:80].replace(chr(10), ' | ')}")
