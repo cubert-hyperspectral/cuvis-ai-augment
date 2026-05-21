@@ -108,7 +108,9 @@ class _PassThrough(Transform):
         cube: torch.Tensor,
         mask: torch.Tensor | None,
         rng: torch.Generator,
+        wavelengths: list[float] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        del wavelengths
         self._validate_shapes(cube, mask)
         return cube, mask
 
@@ -138,6 +140,48 @@ def test_validate_shapes_rejects_mismatched_spatial_dims():
 
 
 # ---------------------------------------------------------------- _draw_apply_mask
+
+
+# ---------------------------------------------------------------- wavelengths (v0.2.0)
+
+
+class _WavelengthEcho(Transform):
+    """Capture the wavelengths argument so tests can assert it threaded through."""
+
+    seen: list[float] | None = None
+
+    def __call__(  # type: ignore[override]
+        self,
+        cube: torch.Tensor,
+        mask: torch.Tensor | None,
+        rng: torch.Generator,
+        wavelengths: list[float] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        self.seen = wavelengths
+        self._validate_wavelengths(cube, wavelengths)
+        return cube, mask
+
+
+def test_wavelengths_default_is_none_and_validation_skipped():
+    cube = torch.zeros((1, 4, 4, 8), dtype=torch.float32)
+    t = _WavelengthEcho()
+    t(cube, None, _rng())
+    assert t.seen is None  # default propagated
+
+
+def test_wavelengths_forwarded_to_subclass():
+    cube = torch.zeros((1, 4, 4, 3), dtype=torch.float32)
+    wl = [500.0, 600.0, 700.0]
+    t = _WavelengthEcho()
+    t(cube, None, _rng(), wavelengths=wl)
+    assert t.seen == wl
+
+
+def test_validate_wavelengths_rejects_length_mismatch():
+    cube = torch.zeros((1, 4, 4, 3), dtype=torch.float32)
+    t = _WavelengthEcho()
+    with pytest.raises(ValueError, match="does not match cube C"):
+        t(cube, None, _rng(), wavelengths=[500.0, 600.0])  # too short
 
 
 def test_draw_apply_mask_extremes_avoid_rng_draw():

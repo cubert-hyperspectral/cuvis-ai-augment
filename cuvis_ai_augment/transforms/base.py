@@ -79,6 +79,15 @@ class Transform(ABC):
 
     Randomness is drawn from a shared :class:`torch.Generator` passed in by the caller
     (:class:`AugmentationCompose`). Subclasses must not create their own RNG state.
+
+    Wavelength awareness
+    --------------------
+    ``__call__`` accepts an optional ``wavelengths`` argument (a ``list[float]`` of
+    per-band centre wavelengths in nanometres, length must equal ``cube.shape[-1]``).
+    Most transforms ignore this argument; wavelength-aware transforms (e.g. illuminant
+    jitter, atmospheric-band warp — planned for v0.3.0+) consume it to make
+    physically-grounded decisions. The argument was introduced in v0.2.0 as a
+    backwards-compatible default so the contract can evolve without an API break.
     """
 
     def __init__(self, prob: float = 0.5, **kwargs: Any) -> None:
@@ -97,6 +106,7 @@ class Transform(ABC):
         cube: Tensor,
         mask: Tensor | None,
         rng: torch.Generator,
+        wavelengths: list[float] | None = None,
     ) -> tuple[Tensor, Tensor | None]:
         """Apply the transform.
 
@@ -108,6 +118,10 @@ class Transform(ABC):
             ``(B, H, W)`` torch.int32 / torch.bool, or ``None``.
         rng : torch.Generator
             Shared RNG. All randomness must come from this generator.
+        wavelengths : list[float] or None, optional
+            Per-band centre wavelengths in nanometres, length ``C``. ``None`` means
+            wavelength metadata isn't available. Wavelength-agnostic transforms ignore
+            this argument; wavelength-aware transforms (v0.3.0+) consume it.
 
         Returns
         -------
@@ -131,6 +145,21 @@ class Transform(ABC):
                     f"cube/mask spatial shapes must match. "
                     f"cube={tuple(cube.shape[:3])}, mask={tuple(mask.shape[:3])}."
                 )
+
+    @staticmethod
+    def _validate_wavelengths(cube: Tensor, wavelengths: list[float] | None) -> None:
+        """Raise if ``wavelengths`` is given but inconsistent with the cube's C axis.
+
+        Wavelength-aware transforms call this from their ``__call__`` before consuming
+        ``wavelengths``. Wavelength-agnostic transforms ignore the argument entirely.
+        """
+        if wavelengths is None:
+            return
+        n_bands = cube.shape[-1]
+        if len(wavelengths) != n_bands:
+            raise ValueError(
+                f"len(wavelengths)={len(wavelengths)} does not match cube C={n_bands}."
+            )
 
     def _draw_apply_mask(
         self, batch_size: int, rng: torch.Generator, device: torch.device

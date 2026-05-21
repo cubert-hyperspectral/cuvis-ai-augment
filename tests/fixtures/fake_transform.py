@@ -26,5 +26,7 @@ class IdentityTransform(Transform):
         cube: Tensor,
         mask: Tensor | None,
         rng: torch.Generator,
+        wavelengths: list[float] | None = None,
     ) -> tuple[Tensor, Tensor | None]:
+        del wavelengths
         return cube, mask

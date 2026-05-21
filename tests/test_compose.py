@@ -82,6 +82,65 @@ def test_extra_transform_modules_loads_external(make_cube):
     assert "IdentityTransform" in TRANSFORM_REGISTRY
 
 
+def test_wavelengths_threaded_to_transforms(make_cube):
+    """AugmentationCompose(wavelengths=...) must thread them to each transform's
+    __call__ so wavelength-aware transforms (v0.3.0+) can consume the metadata."""
+    from cuvis_ai_augment.transforms.base import Transform, register
+
+    captured: list[list[float] | None] = []
+
+    @register("_WavelengthCapturer")
+    class _Capturer(Transform):
+        def __call__(  # type: ignore[override]
+            self,
+            cube,
+            mask,
+            rng,
+            wavelengths=None,
+        ):
+            captured.append(wavelengths)
+            return cube, mask
+
+    try:
+        cube, mask = make_cube(channels=4)
+        node = AugmentationCompose(
+            transforms=[{"type": "_WavelengthCapturer"}],
+            wavelengths=[500.0, 600.0, 700.0, 800.0],
+            seed=0,
+        )
+        node.forward(cube=cube, mask=mask)
+        assert captured == [[500.0, 600.0, 700.0, 800.0]]
+    finally:
+        TRANSFORM_REGISTRY.pop("_WavelengthCapturer", None)
+
+
+def test_wavelengths_default_is_none(make_cube):
+    """If user doesn't pass wavelengths, transforms see None — not an empty list."""
+    from cuvis_ai_augment.transforms.base import Transform, register
+
+    captured: list[list[float] | None] = []
+
+    @register("_WavelengthCapturer2")
+    class _Capturer2(Transform):
+        def __call__(  # type: ignore[override]
+            self,
+            cube,
+            mask,
+            rng,
+            wavelengths=None,
+        ):
+            captured.append(wavelengths)
+            return cube, mask
+
+    try:
+        cube, mask = make_cube(channels=4)
+        node = AugmentationCompose(transforms=[{"type": "_WavelengthCapturer2"}], seed=0)
+        node.forward(cube=cube, mask=mask)
+        assert captured == [None]
+    finally:
+        TRANSFORM_REGISTRY.pop("_WavelengthCapturer2", None)
+
+
 def test_seed_determinism(make_cube):
     cube, mask = make_cube(height=8, width=8)
     specs = [

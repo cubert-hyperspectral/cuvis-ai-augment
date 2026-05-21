@@ -5,6 +5,28 @@ loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.2.0 - 2026-05-15
+
+### Added
+- **Spectral family** (`cuvis_ai_augment.transforms.spectral`):
+  - `GaussianBandNoise` — per-band additive Gaussian noise with optional `per_band_scale` to follow each band's std. Reference: Nalepa et al. 2019; Ahmad et al. 2024 §4.2.
+  - `RandomBandDropout` — zero out a uniformly-drawn `drop_fraction` of bands per sample. Reference: Ahmad et al. 2024 §4.3.
+- **Photometric family** (`cuvis_ai_augment.transforms.photometric`):
+  - `MultiplicativeIlluminationScaling` — multiply each band by a smooth random gain curve `g(λ) ∈ gain_range`. Surrogate for lamp drift / illumination variation; preserves spectral ratios between nearby bands. Reference: Roddan et al. 2024 (Calibration-Jitter, simplified); Nalepa 2019 §III-A.
+- **Mixing family** (`cuvis_ai_augment.transforms.mixing`):
+  - `Cutout` — erase a random rectangular spatial patch in both cube and mask. Configurable `mask_fill_value` for downstream ignore-label semantics. Reference: DeVries & Taylor 2017; Haut et al. 2019.
+- `Transform._validate_wavelengths` helper for future wavelength-aware transforms.
+- 42 new tests (90 total) — coverage ~99.5% on `cuvis_ai_augment/`.
+- Tutorial notebook gains three new family sections (§8–§11) with 3-band visualisations; §12 full-compose now exercises all seven concrete v0.2.0 transforms across four families.
+
+### Changed
+- **API**: `Transform.__call__` now accepts an optional `wavelengths: list[float] | None = None` argument. `AugmentationCompose` accepts a matching `wavelengths` hparam and threads it through to every transform. Backwards-compatible default (`None`); the v0.2.0 transforms ignore the argument. Future wavelength-aware transforms (planned for v0.3.0+) will consume per-band centre wavelengths in nanometres.
+- Transforms are now organised by family on disk: `spatial.py` (existing), `spectral.py`, `photometric.py`, `mixing.py`. No public symbol moves — all transforms still resolve through `TRANSFORM_REGISTRY` by name.
+- `README.md` groups transforms by family and links to academic references.
+
+### Migration
+External `Transform` subclasses (registered via `extra_transform_modules`) must add `wavelengths: list[float] | None = None` to their `__call__` signature. Wavelength-agnostic transforms can ignore the argument (`del wavelengths` at the top of `__call__`). The bundled transforms and the `tests/fixtures/fake_transform.py` fixture have been updated as the reference pattern.
+
 ## 0.1.1 - 2026-05-13
 
 ### Added
