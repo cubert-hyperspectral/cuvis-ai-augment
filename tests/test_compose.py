@@ -32,8 +32,79 @@ def test_compose_equals_sequential_application(make_cube):
     assert torch.equal(out["mask"], expected_mask)
 
 
-def test_execution_stages_train_only():
-    assert AugmentationCompose.execution_stages == {ExecutionStage.TRAIN}
+def test_execution_stages_always_routable_by_default():
+    # ALWAYS-routable: the node stays in cuvis-ai-core's executable set at every
+    # stage so downstream consumers always have a producer for our output port.
+    # TRAIN-only behavior is enforced inside forward() via a stage check.
+    node = AugmentationCompose(transforms=[], seed=0)
+    assert node.execution_stages == {ExecutionStage.ALWAYS}
+    assert node.should_execute(ExecutionStage.TRAIN) is True
+    assert node.should_execute(ExecutionStage.VAL) is True
+    assert node.should_execute(ExecutionStage.TEST) is True
+    assert node.should_execute(ExecutionStage.INFERENCE) is True
+
+
+def test_execution_stages_respect_explicit_override():
+    # Callers can still pass execution_stages= explicitly; we honor it. (This
+    # re-introduces the filter-then-no-route issue and is not recommended.)
+    node = AugmentationCompose(
+        transforms=[],
+        seed=0,
+        execution_stages={ExecutionStage.TRAIN},
+    )
+    assert node.execution_stages == {ExecutionStage.TRAIN}
+    assert node.should_execute(ExecutionStage.VAL) is False
+
+
+def test_forward_is_identity_outside_train(make_cube):
+    # At val/test/inference, forward must return cube/mask byte-identical to the
+    # inputs even if non-trivial transforms are configured. This is the contract
+    # the README advertises.
+    from cuvis_ai_schemas.execution import Context
+
+    cube, mask = make_cube(height=16, width=16)
+    node = AugmentationCompose(
+        transforms=[
+            {"type": "RandomHorizontalFlip", "prob": 1.0},  # would always flip
+            {"type": "RandomVerticalFlip", "prob": 1.0},
+        ],
+        seed=42,
+    )
+    for stage in (ExecutionStage.VAL, ExecutionStage.TEST, ExecutionStage.INFERENCE):
+        ctx = Context(stage=stage)
+        out = node.forward(cube=cube, mask=mask, context=ctx)
+        assert torch.equal(out["cube"], cube), f"forward at {stage} not identity for cube"
+        assert torch.equal(out["mask"], mask), f"forward at {stage} not identity for mask"
+
+
+def test_forward_applies_transforms_at_train(make_cube):
+    # At TRAIN the configured transforms must actually fire. Verifies the stage
+    # check doesn't swallow training-time behavior.
+    from cuvis_ai_schemas.execution import Context
+
+    cube, mask = make_cube(height=16, width=16)
+    node = AugmentationCompose(
+        transforms=[{"type": "RandomHorizontalFlip", "prob": 1.0}],
+        seed=0,
+    )
+    out = node.forward(cube=cube, mask=mask, context=Context(stage=ExecutionStage.TRAIN))
+    assert torch.equal(out["cube"], torch.flip(cube, dims=(2,)))
+    assert torch.equal(out["mask"], torch.flip(mask, dims=(2,)))
+
+
+def test_forward_applies_transforms_when_no_context(make_cube):
+    # Backwards-compatible: calling forward without a Context (e.g. unit tests that
+    # invoke the node directly outside a pipeline) still applies transforms — the
+    # "this is a transform; calling it transforms" intuition. Pipeline-driven calls
+    # always pass context, so the stage gate only fires in production paths.
+    cube, mask = make_cube(height=16, width=16)
+    node = AugmentationCompose(
+        transforms=[{"type": "RandomHorizontalFlip", "prob": 1.0}],
+        seed=0,
+    )
+    out = node.forward(cube=cube, mask=mask)  # no context kwarg
+    assert torch.equal(out["cube"], torch.flip(cube, dims=(2,)))
+    assert torch.equal(out["mask"], torch.flip(mask, dims=(2,)))
 
 
 def test_available_transforms_lists_v1():

@@ -85,7 +85,7 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 | `extra_transform_modules` | `list[str]` | `[]` | Import these module paths before resolving names — for external transform packages. |
 | `wavelengths` | `list[float] | None` | `None` | Optional per-band centre wavelengths in nm. Threaded through to each transform's `__call__`. Wavelength-agnostic transforms ignore it; reserved for v0.3.0+ wavelength-aware transforms. |
 
-**Execution:** `execution_stages = {ExecutionStage.TRAIN}` — automatic no-op outside training.
+**Execution:** the node is registered as `execution_stages = {ALWAYS}` so cuvis-ai-core keeps it in the executable graph at every stage. TRAIN-only behavior is enforced *inside* `forward` via a `Context` stage check: at val/test/inference the node short-circuits to identity (cube and mask pass through unchanged), so downstream consumers always have a producer for the output ports without breaking eval determinism.
 
 ## Available transforms (v0.2.0)
 

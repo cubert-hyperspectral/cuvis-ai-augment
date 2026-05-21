@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- **`AugmentationCompose` no longer silently augments val/test/inference data** (issue #8). The class-level `execution_stages = {ExecutionStage.TRAIN}` declaration was being shadowed by `cuvis_ai_core.node.Node.__init__`'s unconditional write to `self.execution_stages`, leaving the instance with `{ALWAYS}` — so the node ran at every stage and applied random transforms to val/test cubes. Empirically this corrupted pixel-level evaluation (pixel AUROC at val dropped from ~0.97 to ~0.54 in a Dinomaly2 anomaly-detection pipeline). The fix moves TRAIN-only enforcement *inside* `forward` via a Context stage check, keeping the node ALWAYS-routable so cuvis-ai-core's pipeline still wires its output port to downstream consumers. At val/test/inference the node is now a true identity passthrough; `forward` without a Context (standalone unit-test use) still applies transforms.
+- `AugmentationCompose.forward` now accepts an optional `context: Context | None = None` parameter; called inside a cuvis-ai-core pipeline, the runtime passes a `Context(stage=...)` automatically.
+
 ## 0.3.1 - 2026-06-24
 
 - Commented out the local `[tool.uv.sources]` `cuvis-ai-core` editable path so the released tag no longer carries a machine-specific source. The lock is unchanged (already generated `--no-sources`); the path stays as a commented dev-only override.
