@@ -59,7 +59,10 @@ include = ["cuvis_ai_augment*"]
 # Release installs from Git tags / manifests resolve dependencies from normal indexes.
 # NOTE: uv.lock is generated with --no-sources; CI uses --locked --no-sources.
 torch = { index = "pytorch-cu128" }
-cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core", editable = true }
+# Local dev override only: uncomment with a sibling cuvis-ai-core checkout present. It must
+# stay commented in any release, since a local path baked into a tag breaks a fresh `uv sync`
+# of this repo. Enforced by the "no local path sources" gate in release.yml.
+# cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -105,4 +108,4 @@ skips = ["B101"]
 [tool.setuptools_scm]
 version_scheme = "post-release"
 local_scheme = "node-and-date"
-fallback_version = "0.3.0"
+fallback_version = "0.3.1"
