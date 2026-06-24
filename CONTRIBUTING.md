@@ -23,7 +23,7 @@ We welcome contributions — bug reports, fixes, new transforms, docs.
    uv run --no-sources --extra dev mypy cuvis_ai_augment/
    ```
 
-5. Update `CHANGELOG.md` under `## Unreleased`.
+5. Update `CHANGELOG.md` under `## [Unreleased]`.
 6. Open a PR. Watch CI go green, then squash-merge.
 
 ## Code style
@@ -44,8 +44,9 @@ test in `test_compose.py`. If you add new fixtures, mirror that import path.
 
 ## How the workflows work
 
-The repo ships two GitHub Actions workflows. Together they form a tight, blameable feedback
-loop: every push runs the full CI matrix, every `v*.*.*` tag cuts a release.
+The repo ships three GitHub Actions workflows. Together they form a tight, blameable feedback
+loop: every push runs the full CI matrix, dependency PRs are audited against the cuvis-ai-core
+lock, and every `v*.*.*` tag cuts a release.
 
 ### `.github/workflows/ci.yml` — runs on every push and pull request
 
@@ -120,8 +121,16 @@ Three independent sub-steps in one job:
   run: uv run --no-sources --extra dev twine check dist/*
 ```
 
-Catches packaging mistakes — missing `MANIFEST.in` entries, malformed `pyproject.toml`,
-non-PEP-508 dep specifiers — *before* a tag tries to publish them.
+Catches packaging mistakes (missing files, malformed `pyproject.toml`, non-PEP-508 dep
+specifiers) *before* a tag tries to publish them.
+
+### `.github/workflows/cuvis_ai_compat.yml` — dependency-compat gate
+
+Runs on PRs that touch `pyproject.toml` / `uv.lock`, on a weekly cron, and on manual
+dispatch. It fetches `audit_plugin_deps.py` and `uv.lock` from cuvis-ai-core (`CORE_REF`,
+default `main`) and asserts that this plugin's dependency specifiers still admit the versions
+core locks. A core release that tightens a shared dependency turns this red as a "core moved,
+react" signal rather than surfacing at a user's first pipeline run.
 
 ### `.github/workflows/release.yml` — runs only on `v*.*.*` tags
 
@@ -131,9 +140,11 @@ Four jobs, each gating the next:
 
 #### 1. `Validate Release Candidate`
 
-Asserts that the tag string matches `pyproject.toml [project] version` and that
-`CHANGELOG.md` has a `## <version> - YYYY-MM-DD` section. Cheap pre-flight: a missing
-changelog entry fails the release within ~10 seconds rather than after a 90s build.
+Runs the focused test suite and ruff checks against the tagged commit. The version is
+derived from the git tag by setuptools-scm (no static `version` to keep in sync), and the
+build job (job 3) asserts the built wheel's version equals the tag. `CHANGELOG.md` must have
+a `## <version> - YYYY-MM-DD` section, which the `Create GitHub Release` job extracts as the
+release body, so a missing entry fails the release.
 
 #### 2. `Security Scanning`
 
@@ -170,42 +181,43 @@ Pulls the artifacts from job 3, writes the changelog section into the release bo
 publishes the Release at the tag. This is what makes
 `uv add "git+https://github.com/...@v0.1.0"` work cleanly for downstream consumers.
 
-### Why two workflows?
+### Why separate workflows?
 
-CI runs on **every push and PR** — fast, cheap, fail-loud feedback during development.
-Release runs **only on `v*` tags** — heavier work, version-consistency checks, artifact
-publishing. Same security and build checks in both for safety, different triggers and
+CI runs on **every push and PR**: fast, cheap, fail-loud feedback during development. The
+compat gate runs on **dependency PRs and a weekly cron**: it watches for upstream drift.
+Release runs **only on `v*` tags**: heavier work, version-consistency checks, artifact
+publishing. Same security and build checks across them for safety, different triggers and
 outputs.
 
 ## Release process
 
-Releases follow semver. See [the cuvis-ai-plugin release-checklist skill](https://github.com/cubert-hyperspectral/cuvis-ai-agentic-skills/blob/main/skills/cuvis-ai-plugin/release-checklist.md)
-for the canonical procedure. Short version:
+Releases follow semver. The package version is derived from the git tag by setuptools-scm,
+so there is no static `version` to bump. Short version:
 
-1. Bump `pyproject.toml [project] version`.
-2. Move `## Unreleased` entries into a `## <version> - YYYY-MM-DD` section in `CHANGELOG.md`.
-3. Open a PR titled `Release vX.Y.Z`. Merge once CI is green.
-4. From `main`: `git tag -a vX.Y.Z -m "Release vX.Y.Z: <summary>"` then `git push origin vX.Y.Z`.
-5. The release workflow runs; watch it. If it fails: delete the remote tag, fix on a
-   branch, re-tag to vX.Y.(Z+1). **Tags are immutable** — don't repoint.
-6. Verify the released tag clones + loads cleanly:
+1. Move `## [Unreleased]` entries into a `## <version> - YYYY-MM-DD` section in `CHANGELOG.md`
+   (this section becomes the GitHub Release body).
+2. Open a PR with the changelog stamp. Merge once CI is green.
+3. From `main`: `git tag -a vX.Y.Z -m "Release vX.Y.Z: <summary>"` then `git push origin vX.Y.Z`.
+4. The release workflow runs; watch it. If it fails: delete the remote tag, fix on a
+   branch, re-tag to vX.Y.(Z+1). **Tags are immutable**, don't repoint.
+5. Verify the released tag clones + loads cleanly:
 
    ```bash
    mkdir -p /tmp/plugin-verify && cd /tmp/plugin-verify
    cat > registry.yaml <<'YAML'
-   plugins:
-     augment:
-       repo: "https://github.com/cubert-hyperspectral/cuvis-ai-augment.git"
-       tag:  "vX.Y.Z"
-       provides:
-         - cuvis_ai_augment.node.compose.AugmentationCompose
+   name: augment
+   repo: "https://github.com/cubert-hyperspectral/cuvis-ai-augment.git"
+   tag: "vX.Y.Z"
+   package_name: cuvis-ai-augment
+   capabilities:
+     - class_name: cuvis_ai_augment.node.compose.AugmentationCompose
    YAML
-   uv run python -c "from cuvis_ai_core.utils.node_registry import NodeRegistry; r=NodeRegistry(); r.load_plugins('registry.yaml'); print(r.list_plugins())"
+   uv run python -c "from cuvis_ai_core.utils.node_registry import NodeRegistry; r=NodeRegistry(); r.register_plugin('registry.yaml'); print(r.get('AugmentationCompose').__name__)"
    ```
 
-   Expected output: `Loaded plugins: ['augment']`.
+   Expected output: `AugmentationCompose`.
 
-7. Open a PR against `cubert-hyperspectral/cuvis-ai` bumping the `tag:` in
+6. Open a PR against `cubert-hyperspectral/cuvis-ai` bumping the `tag:` in
    `configs/plugins/augment.yaml` (or adding the entry if the plugin is new).
 
 ## Issues
