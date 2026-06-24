@@ -1,9 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## 0.3.2 - 2026-06-24
 
 - **`AugmentationCompose` no longer silently augments val/test/inference data** (issue #8). The class-level `execution_stages = {ExecutionStage.TRAIN}` declaration was being shadowed by `cuvis_ai_core.node.Node.__init__`'s unconditional write to `self.execution_stages`, leaving the instance with `{ALWAYS}` — so the node ran at every stage and applied random transforms to val/test cubes. Empirically this corrupted pixel-level evaluation (pixel AUROC at val dropped from ~0.97 to ~0.54 in a Dinomaly2 anomaly-detection pipeline). The fix moves TRAIN-only enforcement *inside* `forward` via a Context stage check, keeping the node ALWAYS-routable so cuvis-ai-core's pipeline still wires its output port to downstream consumers. At val/test/inference the node is now a true identity passthrough; `forward` without a Context (standalone unit-test use) still applies transforms.
 - `AugmentationCompose.forward` now accepts an optional `context: Context | None = None` parameter; called inside a cuvis-ai-core pipeline, the runtime passes a `Context(stage=...)` automatically.
+- **Warns on an explicit `execution_stages` override.** Passing any non-`{ALWAYS}` set re-introduces the filter-then-no-route problem (the node is dropped from the pipeline at non-matching stages, leaving downstream consumers of its output ports without a producer), so the constructor now emits a `UserWarning` rather than honoring it silently.
+- Updated the tutorial notebook takeaway (and its generator and rendered HTML) that still described the node as `execution_stages={TRAIN}`; it now documents the ALWAYS-routable, internally-gated behavior.
 
 ## 0.3.1 - 2026-06-24
 
