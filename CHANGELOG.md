@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## 0.3.1 - 2026-06-24
+
+- Commented out the local `[tool.uv.sources]` `cuvis-ai-core` editable path so the released tag no longer carries a machine-specific source. The lock is unchanged (already generated `--no-sources`); the path stays as a commented dev-only override.
+- Added a release gate that rejects any active local `[tool.uv.sources]` path entry, so a local override cannot ship in a tag again.
+
 ## 0.3.0 - 2026-06-24
 
 - Migrated `examples/plugins.yaml` to the bare `name:` + `capabilities:` manifest shape required by cuvis-ai-schemas 0.7.0; dropped the retired nested `plugins:/provides:` wrapper.
