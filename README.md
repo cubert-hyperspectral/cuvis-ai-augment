@@ -41,7 +41,7 @@ uv sync --extra dev --extra notebooks  # add the tutorial notebook extras
 Or, from another cuvis-ai project, install from a tagged release:
 
 ```bash
-uv add "git+https://github.com/cubert-hyperspectral/cuvis-ai-augment@v0.2.0"
+uv add "git+https://github.com/cubert-hyperspectral/cuvis-ai-augment@v0.3.0"
 ```
 
 ## Usage (pipeline YAML)
@@ -180,33 +180,33 @@ so your `@register` decorators populate `TRANSFORM_REGISTRY` first.
 For local development (path relative to the manifest):
 
 ```yaml
-plugins:
-  augment:
-    path: ".."
-    provides:
-      - cuvis_ai_augment.node.compose.AugmentationCompose
+name: augment
+path: ".."
+capabilities:
+  - class_name: cuvis_ai_augment.node.compose.AugmentationCompose
 ```
 
 For releases, pin a git tag:
 
 ```yaml
-plugins:
-  augment:
-    repo: "https://github.com/cubert-hyperspectral/cuvis-ai-augment.git"
-    tag: "v0.2.0"
-    provides:
-      - cuvis_ai_augment.node.compose.AugmentationCompose
+name: augment
+repo: "https://github.com/cubert-hyperspectral/cuvis-ai-augment.git"
+tag: "v0.3.0"
+package_name: cuvis-ai-augment
+capabilities:
+  - class_name: cuvis_ai_augment.node.compose.AugmentationCompose
 ```
 
 ## Compatibility
 
-| `cuvis-ai-augment` | `cuvis-ai-core` | `torch` | `numpy` |
-|---|---|---|---|
-| `0.2.0` | `>=0.1.0` (tested against 0.5.2) | `>=2.1` | `>=1.20.0` |
-| `0.1.x` | `>=0.1.0` (tested against 0.5.2) | `>=2.1` | `>=1.20.0` |
+| `cuvis-ai-augment` | `cuvis-ai-core` | `cuvis-ai-schemas` | `torch` | `numpy` |
+|---|---|---|---|---|
+| `0.3.0` | `>=0.10.0` | `>=0.7.0` | `>=2.1` | `>=1.20.0` |
+| `0.2.0` | `>=0.1.0` (tested against 0.5.2) | `>=0.4.0` | `>=2.1` | `>=1.20.0` |
+| `0.1.x` | `>=0.1.0` (tested against 0.5.2) | `>=0.4.0` | `>=2.1` | `>=1.20.0` |
 
 The tagged-manifest model is verified at release time by cloning the published tag fresh
-and loading it via `NodeRegistry.load_plugins()` — see the release checklist in
+and loading it via `NodeRegistry.register_plugin()` — see the release checklist in
 [CONTRIBUTING.md](CONTRIBUTING.md#release-process).
 
 ## Development

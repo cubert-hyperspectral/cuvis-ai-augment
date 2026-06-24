@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cuvis-ai-augment"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Data-augmentation node for cuvis.ai hyperspectral training pipelines."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,8 +16,8 @@ dependencies = [
     # Mirrors sibling plugins (dinomaly, sam3, deepeiou): depend only on cuvis-ai-core
     # + cuvis-ai-schemas, never the high-level `cuvis-ai` package (which eagerly imports
     # the proprietary Cuvis SDK at module load).
-    "cuvis-ai-core>=0.1.0",
-    "cuvis-ai-schemas>=0.4.0",
+    "cuvis-ai-core>=0.10.0",
+    "cuvis-ai-schemas>=0.7.0",
     "torch>=2.1",
     "numpy>=1.20.0",
 ]
@@ -48,6 +48,8 @@ kornia = ["kornia>=0.7.3"]
 [project.urls]
 Homepage = "https://www.cubert-hyperspectral.com/"
 Repository = "https://github.com/cubert-hyperspectral/cuvis-ai-augment"
+Issues = "https://github.com/cubert-hyperspectral/cuvis-ai-augment/issues"
+Changelog = "https://github.com/cubert-hyperspectral/cuvis-ai-augment/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["cuvis_ai_augment*"]
@@ -57,7 +59,7 @@ include = ["cuvis_ai_augment*"]
 # Release installs from Git tags / manifests resolve dependencies from normal indexes.
 # NOTE: uv.lock is generated with --no-sources; CI uses --locked --no-sources.
 torch = { index = "pytorch-cu128" }
-cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core-sam3", editable = true }
+cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -99,3 +101,8 @@ show_missing = true
 [tool.bandit]
 exclude_dirs = ["tests", "examples", ".venv"]
 skips = ["B101"]
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "node-and-date"
+fallback_version = "0.3.0"
