@@ -15,6 +15,7 @@ identity (cube and mask passed through unchanged). This delivers the documented
 from __future__ import annotations
 
 import importlib
+import warnings
 from typing import Any
 
 import torch
@@ -128,7 +129,17 @@ class AugmentationCompose(Node):
         # ALWAYS-routable: node stays in the executable graph at all stages; stage
         # gating happens inside forward(). Callers can override by passing
         # execution_stages= explicitly, but that re-introduces the routing issue
-        # described above (use at your own risk).
+        # described above (use at your own risk), so warn loudly to keep it from being silent.
+        explicit_stages = kwargs.get("execution_stages")
+        if explicit_stages is not None and set(explicit_stages) != {ExecutionStage.ALWAYS}:
+            warnings.warn(
+                "AugmentationCompose was given an explicit execution_stages="
+                f"{explicit_stages!r}. Any non-ALWAYS set filters this node out of the "
+                "pipeline at non-matching stages, leaving downstream consumers of its "
+                "output ports without a producer. The node is designed to stay "
+                "ALWAYS-routable and gate transforms internally; override at your own risk.",
+                stacklevel=2,
+            )
         kwargs.setdefault("execution_stages", {ExecutionStage.ALWAYS})
 
         super().__init__(
@@ -173,7 +184,10 @@ class AugmentationCompose(Node):
         # Stage gate: identity passthrough at val/test/inference. When called outside
         # a cuvis-ai-core pipeline (context is None), default to applying transforms —
         # matches the "this is a transform; calling it transforms" intuition that
-        # standalone unit tests rely on.
+        # standalone unit tests rely on. The safer alternative (treat a missing context
+        # as non-TRAIN identity) is rejected deliberately so a direct forward() call
+        # still augments; pipeline calls always pass a Context, so the production
+        # stage-gate is unaffected.
         stage = getattr(context, "stage", None) if context is not None else None
         if stage is not None and stage != ExecutionStage.TRAIN:
             out_identity: dict[str, Tensor | None] = {"cube": cube}

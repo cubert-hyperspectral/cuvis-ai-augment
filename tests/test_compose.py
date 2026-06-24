@@ -45,13 +45,14 @@ def test_execution_stages_always_routable_by_default():
 
 
 def test_execution_stages_respect_explicit_override():
-    # Callers can still pass execution_stages= explicitly; we honor it. (This
-    # re-introduces the filter-then-no-route issue and is not recommended.)
-    node = AugmentationCompose(
-        transforms=[],
-        seed=0,
-        execution_stages={ExecutionStage.TRAIN},
-    )
+    # Callers can still pass execution_stages= explicitly; we honor it but warn,
+    # because it re-introduces the filter-then-no-route issue and is not recommended.
+    with pytest.warns(UserWarning, match="execution_stages"):
+        node = AugmentationCompose(
+            transforms=[],
+            seed=0,
+            execution_stages={ExecutionStage.TRAIN},
+        )
     assert node.execution_stages == {ExecutionStage.TRAIN}
     assert node.should_execute(ExecutionStage.VAL) is False
 
