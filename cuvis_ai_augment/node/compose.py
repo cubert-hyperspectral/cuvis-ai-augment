@@ -5,18 +5,23 @@ its paired mask) in order. Augmentations are sequenced via this node's ``transfo
 hparam rather than via separate pipeline edges, matching the
 albumentations / torchvision.transforms.v2 / Kornia idiom.
 
-``execution_stages={ExecutionStage.TRAIN}`` makes this node automatically a no-op at
-val/test/inference — no extra wiring needed in pipeline YAMLs.
+The node is registered as ``execution_stages={ALWAYS}`` so cuvis-ai-core keeps it in
+the executable graph at every stage. TRAIN-only behavior is enforced *internally* in
+``forward`` via a Context stage check: at val/test/inference it short-circuits to
+identity (cube and mask passed through unchanged). This delivers the documented
+"no-op at val/test/inference" semantics while preserving downstream port routing.
 """
 
 from __future__ import annotations
 
 import importlib
+import warnings
 from typing import Any
 
 import torch
 from cuvis_ai_core.node.node import Node
 from cuvis_ai_schemas.enums import ExecutionStage
+from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PortSpec
 from torch import Tensor
 
@@ -91,9 +96,21 @@ class AugmentationCompose(Node):
         ),
     }
 
-    # Augmentations only apply during training.
-    execution_stages = {ExecutionStage.TRAIN}
-
+    # TRAIN-only behavior is enforced inside ``forward`` (Context stage check), NOT
+    # via cuvis-ai-core's ``execution_stages`` filter, for two reasons:
+    #
+    # 1. ``Node.__init__`` writes ``self.execution_stages`` from a kwarg (defaulting
+    #    to ``{ALWAYS}``) on every instance, *unconditionally* — a class-level
+    #    declaration here would be silently shadowed at construction time and never
+    #    reach ``should_execute``. Empirically verified (see issue #8).
+    #
+    # 2. Even if the class attribute were honored, cuvis-ai-core's pipeline reacts
+    #    to a filtered node by removing it from the executable set entirely (no
+    #    passthrough routing). Downstream consumers that subscribed to our output
+    #    port would then crash with ``missing required input``. Keeping the node
+    #    ALWAYS-routable and short-circuiting to identity in ``forward`` is the
+    #    only way to deliver the "no-op at val/test/inference" behavior without a
+    #    cuvis-ai-core change.
     def __init__(
         self,
         transforms: list[dict[str, Any]] | None = None,
@@ -108,6 +125,22 @@ class AugmentationCompose(Node):
         self.wavelengths: list[float] | None = (
             [float(w) for w in wavelengths] if wavelengths is not None else None
         )
+
+        # ALWAYS-routable: node stays in the executable graph at all stages; stage
+        # gating happens inside forward(). Callers can override by passing
+        # execution_stages= explicitly, but that re-introduces the routing issue
+        # described above (use at your own risk), so warn loudly to keep it from being silent.
+        explicit_stages = kwargs.get("execution_stages")
+        if explicit_stages is not None and set(explicit_stages) != {ExecutionStage.ALWAYS}:
+            warnings.warn(
+                "AugmentationCompose was given an explicit execution_stages="
+                f"{explicit_stages!r}. Any non-ALWAYS set filters this node out of the "
+                "pipeline at non-matching stages, leaving downstream consumers of its "
+                "output ports without a producer. The node is designed to stay "
+                "ALWAYS-routable and gate transforms internally; override at your own risk.",
+                stacklevel=2,
+            )
+        kwargs.setdefault("execution_stages", {ExecutionStage.ALWAYS})
 
         super().__init__(
             transforms=self.transforms_spec,
@@ -145,8 +178,23 @@ class AugmentationCompose(Node):
         self,
         cube: Tensor,
         mask: Tensor | None = None,
+        context: Context | None = None,
         **_: Any,
     ) -> dict[str, Tensor | None]:
+        # Stage gate: identity passthrough at val/test/inference. When called outside
+        # a cuvis-ai-core pipeline (context is None), default to applying transforms —
+        # matches the "this is a transform; calling it transforms" intuition that
+        # standalone unit tests rely on. The safer alternative (treat a missing context
+        # as non-TRAIN identity) is rejected deliberately so a direct forward() call
+        # still augments; pipeline calls always pass a Context, so the production
+        # stage-gate is unaffected.
+        stage = getattr(context, "stage", None) if context is not None else None
+        if stage is not None and stage != ExecutionStage.TRAIN:
+            out_identity: dict[str, Tensor | None] = {"cube": cube}
+            if mask is not None:
+                out_identity["mask"] = mask
+            return out_identity
+
         for transform in self._transforms:
             cube, mask = transform(cube, mask, self._rng, wavelengths=self.wavelengths)
         out: dict[str, Tensor | None] = {"cube": cube}

@@ -31,8 +31,12 @@ def test_output_specs_contract() -> None:
     assert outs["mask"].optional is True
 
 
-def test_execution_stages_train_only() -> None:
-    assert AugmentationCompose.execution_stages == {ExecutionStage.TRAIN}
+def test_instance_execution_stages_always_routable() -> None:
+    # The node is registered as ALWAYS-routable so cuvis-ai-core keeps it in the
+    # executable graph at every stage; TRAIN-only behavior is enforced inside
+    # forward() via a Context stage check. See issue #8 for the rationale.
+    node = AugmentationCompose(transforms=[])
+    assert node.execution_stages == {ExecutionStage.ALWAYS}
 
 
 def test_instantiable_with_empty_transforms() -> None:

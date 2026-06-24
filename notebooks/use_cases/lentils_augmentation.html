@@ -8970,8 +8970,10 @@ stochastic pipeline varies across training steps while remaining fully reproduci
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="13-%C2%B7-Takeaways">13 · Takeaways<a class="anchor-link" href="#13-%C2%B7-Takeaways">¶</a></h2><ul>
-<li><strong><code>execution_stages={TRAIN}</code></strong> — <code>AugmentationCompose</code> is a no-op outside training.
-No need to remove it from your pipeline YAML for validation or inference runs.</li>
+<li><strong>No-op outside training.</strong> <code>AugmentationCompose</code> stays in the executable graph at
+every stage (<code>execution_stages={ALWAYS}</code>) and short-circuits to an identity passthrough
+at val/test/inference, so there is no need to remove it from your pipeline YAML for
+those runs.</li>
 <li><strong>Seed once at the Node</strong> — <code>seed:</code> on <code>AugmentationCompose</code> drives the shared
 <code>torch.Generator</code> that every transform draws from. Reproducible runs need only this
 seed plus the data-loader seed.</li>
