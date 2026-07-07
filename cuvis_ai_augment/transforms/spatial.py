@@ -236,3 +236,127 @@ class RandomSpatialCrop(Transform):
             if mask is not None and mask_out is not None:
                 mask_out[b] = mask[b, t : t + H_out, l : l + W_out]
         return cube_out, mask_out
+
+
+@register("RandomForegroundBiasedCrop")
+class RandomForegroundBiasedCrop(Transform):
+    """Crop to ``(H_out, W_out)`` with nnU-Net-style foreground oversampling.
+
+    Extends :class:`RandomSpatialCrop` semantics with class-balanced foreground
+    bias, mirroring nnU-Net's ``oversample_foreground_percent``: a deterministic
+    *last fraction* of every batch is forced to contain foreground by centering
+    the crop window on a randomly chosen pixel of a randomly chosen foreground
+    class (``mask > 0``), clamped to the image bounds. Remaining samples crop
+    exactly like ``RandomSpatialCrop``; samples without foreground (or when no
+    mask is connected) fall back to the uniform behaviour.
+
+    Parameters
+    ----------
+    size : tuple[int, int]
+        Output ``(H_out, W_out)``. Must satisfy ``H_out <= H`` and ``W_out <= W``.
+    fg_percent : float
+        Fraction of each batch forced to contain foreground: the **last**
+        ``round(B * fg_percent)`` samples (deterministic batch positions).
+    prob : float
+        For the non-forced samples: probability of a random offset; otherwise
+        a deterministic centre crop (identical to ``RandomSpatialCrop``).
+    """
+
+    def __init__(
+        self,
+        size: tuple[int, int] | list[int],
+        fg_percent: float = 0.33,
+        prob: float = 1.0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(prob=prob, **kwargs)
+        size_t = tuple(int(x) for x in size)
+        if len(size_t) != 2 or any(s <= 0 for s in size_t):
+            raise ValueError(f"size must be a pair of positive ints, got {size!r}")
+        if not 0.0 <= float(fg_percent) <= 1.0:
+            raise ValueError(f"fg_percent must be in [0, 1], got {fg_percent!r}")
+        self.size: tuple[int, int] = (size_t[0], size_t[1])
+        self.fg_percent = float(fg_percent)
+
+    def __call__(
+        self,
+        cube: Tensor,
+        mask: Tensor | None,
+        rng: torch.Generator,
+        wavelengths: list[float] | None = None,
+    ) -> tuple[Tensor, Tensor | None]:
+        del wavelengths  # wavelength-agnostic
+        self._validate_shapes(cube, mask)
+        B, H, W, C = cube.shape
+        H_out, W_out = self.size
+
+        if H_out > H or W_out > W:
+            raise ValueError(
+                f"Crop size ({H_out}, {W_out}) exceeds cube spatial dims (H={H}, W={W})."
+            )
+
+        device = cube.device
+        max_top = H - H_out
+        max_left = W - W_out
+
+        # Base offsets for every sample — identical to RandomSpatialCrop.
+        random_apply = self._draw_apply_mask(B, rng, device)
+        if max_top > 0:
+            rand_top = torch.randint(low=0, high=max_top + 1, size=(B,), generator=rng).to(
+                device=device
+            )
+        else:
+            rand_top = torch.zeros(B, dtype=torch.long, device=device)
+        if max_left > 0:
+            rand_left = torch.randint(low=0, high=max_left + 1, size=(B,), generator=rng).to(
+                device=device
+            )
+        else:
+            rand_left = torch.zeros(B, dtype=torch.long, device=device)
+        centre_top = torch.full((B,), max_top // 2, dtype=torch.long, device=device)
+        centre_left = torch.full((B,), max_left // 2, dtype=torch.long, device=device)
+        top = torch.where(random_apply, rand_top, centre_top)
+        left = torch.where(random_apply, rand_left, centre_left)
+
+        # nnU-Net rule: the LAST round(B * fg_percent) samples are forced foreground.
+        n_forced = int(round(B * self.fg_percent))
+        first_forced = B - n_forced
+
+        cube_out = torch.empty((B, H_out, W_out, C), dtype=cube.dtype, device=device)
+        mask_out = (
+            torch.empty((B, H_out, W_out), dtype=mask.dtype, device=device)
+            if mask is not None
+            else None
+        )
+        for b in range(B):
+            t = int(top[b].item())
+            l = int(left[b].item())  # noqa: E741 — `l` is fine for index here
+            if mask is not None and b >= first_forced:
+                fg = self._fg_center(mask[b], rng)
+                if fg is not None:
+                    cy, cx = fg
+                    t = min(max(cy - H_out // 2, 0), max_top)
+                    l = min(max(cx - W_out // 2, 0), max_left)
+            cube_out[b] = cube[b, t : t + H_out, l : l + W_out, :]
+            if mask is not None and mask_out is not None:
+                mask_out[b] = mask[b, t : t + H_out, l : l + W_out]
+        return cube_out, mask_out
+
+    @staticmethod
+    def _fg_center(mask_b: Tensor, rng: torch.Generator) -> tuple[int, int] | None:
+        """Random pixel of a random foreground class in ``mask_b`` (or None if empty).
+
+        nnU-Net's selection: pick an eligible class uniformly, then a pixel of
+        that class uniformly — so rare classes are sampled as often as common
+        ones. Works for bool and integer masks. Draws from ``rng`` only when
+        foreground exists, keeping the RNG stream identical to
+        ``RandomSpatialCrop`` for foreground-free batches.
+        """
+        labels = torch.unique(mask_b)
+        labels = labels[labels > 0]
+        if labels.numel() == 0:
+            return None
+        cls = labels[int(torch.randint(labels.numel(), (1,), generator=rng).item())]
+        coords = (mask_b == cls).nonzero(as_tuple=False)  # [N, 2] (y, x)
+        j = int(torch.randint(coords.shape[0], (1,), generator=rng).item())
+        return int(coords[j, 0].item()), int(coords[j, 1].item())
