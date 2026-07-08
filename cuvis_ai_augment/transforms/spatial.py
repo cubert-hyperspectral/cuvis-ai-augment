@@ -243,23 +243,39 @@ class RandomForegroundBiasedCrop(Transform):
     """Crop to ``(H_out, W_out)`` with nnU-Net-style foreground oversampling.
 
     Extends :class:`RandomSpatialCrop` semantics with class-balanced foreground
-    bias, mirroring nnU-Net's ``oversample_foreground_percent``: a deterministic
-    *last fraction* of every batch is forced to contain foreground by centering
-    the crop window on a randomly chosen pixel of a randomly chosen foreground
-    class (``mask > 0``), clamped to the image bounds. Remaining samples crop
-    exactly like ``RandomSpatialCrop``; samples without foreground (or when no
-    mask is connected) fall back to the uniform behaviour.
+    bias, mirroring nnU-Net's ``oversample_foreground_percent``: a subset of
+    every batch is forced to contain foreground by centering the crop window
+    on a randomly chosen pixel of a randomly chosen eligible foreground class,
+    clamped to the image bounds. The subset is the deterministic *last*
+    ``round(B * fg_percent)`` samples (nnU-Net's default) or an independent
+    per-sample Bernoulli draw (``probabilistic=True``). Eligible foreground is
+    ``mask > 0`` by default, or an explicit ``fg_labels`` set. Remaining
+    samples crop exactly like ``RandomSpatialCrop``; samples without eligible
+    foreground (or when no mask is connected) fall back to the uniform
+    behaviour.
 
     Parameters
     ----------
     size : tuple[int, int]
         Output ``(H_out, W_out)``. Must satisfy ``H_out <= H`` and ``W_out <= W``.
     fg_percent : float
-        Fraction of each batch forced to contain foreground: the **last**
-        ``round(B * fg_percent)`` samples (deterministic batch positions).
+        Fraction of each batch forced to contain foreground. Deterministic
+        mode forces the **last** ``round(B * fg_percent)`` samples (nnU-Net's
+        rule); probabilistic mode draws Bernoulli(``fg_percent``) per sample.
     prob : float
         For the non-forced samples: probability of a random offset; otherwise
         a deterministic centre crop (identical to ``RandomSpatialCrop``).
+    fg_labels : list[int], optional
+        Mask labels that count as foreground. ``None`` (default) means every
+        label ``> 0``; pass an explicit list when some labels are semantically
+        background (e.g. "normal object" classes).
+    probabilistic : bool
+        ``False`` (default): deterministic last-k selection, RNG stream
+        identical to ``RandomSpatialCrop`` for foreground-free batches.
+        ``True``: independent per-sample Bernoulli — use for small batch
+        sizes (``B=1`` deterministic rounds to zero forced samples) and as a
+        stochastic augmentation (e.g. ``fg_percent=0.5`` for a 50/50 mix of
+        object-centered and uniform crops).
     """
 
     def __init__(
@@ -267,6 +283,8 @@ class RandomForegroundBiasedCrop(Transform):
         size: tuple[int, int] | list[int],
         fg_percent: float = 0.33,
         prob: float = 1.0,
+        fg_labels: list[int] | None = None,
+        probabilistic: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(prob=prob, **kwargs)
@@ -277,6 +295,10 @@ class RandomForegroundBiasedCrop(Transform):
             raise ValueError(f"fg_percent must be in [0, 1], got {fg_percent!r}")
         self.size: tuple[int, int] = (size_t[0], size_t[1])
         self.fg_percent = float(fg_percent)
+        self.fg_labels = None if fg_labels is None else [int(x) for x in fg_labels]
+        if self.fg_labels is not None and len(self.fg_labels) == 0:
+            raise ValueError("fg_labels must be None or a non-empty list of labels")
+        self.probabilistic = bool(probabilistic)
 
     def __call__(
         self,
@@ -318,9 +340,16 @@ class RandomForegroundBiasedCrop(Transform):
         top = torch.where(random_apply, rand_top, centre_top)
         left = torch.where(random_apply, rand_left, centre_left)
 
-        # nnU-Net rule: the LAST round(B * fg_percent) samples are forced foreground.
-        n_forced = int(round(B * self.fg_percent))
-        first_forced = B - n_forced
+        # Which samples are forced to contain foreground. Drawn AFTER the base
+        # offsets so deterministic mode keeps the RandomSpatialCrop RNG stream.
+        if self.probabilistic:
+            forced = torch.rand(B, generator=rng) < self.fg_percent
+        else:
+            # nnU-Net rule: the LAST round(B * fg_percent) samples are forced.
+            n_forced = int(round(B * self.fg_percent))
+            forced = torch.zeros(B, dtype=torch.bool)
+            if n_forced:
+                forced[B - n_forced :] = True
 
         cube_out = torch.empty((B, H_out, W_out, C), dtype=cube.dtype, device=device)
         mask_out = (
@@ -331,7 +360,7 @@ class RandomForegroundBiasedCrop(Transform):
         for b in range(B):
             t = int(top[b].item())
             l = int(left[b].item())  # noqa: E741 — `l` is fine for index here
-            if mask is not None and b >= first_forced:
+            if mask is not None and bool(forced[b]):
                 fg = self._fg_center(mask[b], rng)
                 if fg is not None:
                     cy, cx = fg
@@ -342,18 +371,22 @@ class RandomForegroundBiasedCrop(Transform):
                 mask_out[b] = mask[b, t : t + H_out, l : l + W_out]
         return cube_out, mask_out
 
-    @staticmethod
-    def _fg_center(mask_b: Tensor, rng: torch.Generator) -> tuple[int, int] | None:
-        """Random pixel of a random foreground class in ``mask_b`` (or None if empty).
+    def _fg_center(self, mask_b: Tensor, rng: torch.Generator) -> tuple[int, int] | None:
+        """Random pixel of a random eligible foreground class (None if empty).
 
         nnU-Net's selection: pick an eligible class uniformly, then a pixel of
         that class uniformly — so rare classes are sampled as often as common
-        ones. Works for bool and integer masks. Draws from ``rng`` only when
-        foreground exists, keeping the RNG stream identical to
-        ``RandomSpatialCrop`` for foreground-free batches.
+        ones. Eligible classes are ``> 0`` by default or the explicit
+        ``fg_labels`` set. Works for bool and integer masks. Draws from ``rng``
+        only when eligible foreground exists, keeping the RNG stream identical
+        to ``RandomSpatialCrop`` for foreground-free batches.
         """
         labels = torch.unique(mask_b)
-        labels = labels[labels > 0]
+        if self.fg_labels is None:
+            labels = labels[labels > 0]
+        else:
+            allowed = torch.tensor(self.fg_labels, dtype=labels.dtype, device=labels.device)
+            labels = labels[torch.isin(labels, allowed)]
         if labels.numel() == 0:
             return None
         cls = labels[int(torch.randint(labels.numel(), (1,), generator=rng).item())]

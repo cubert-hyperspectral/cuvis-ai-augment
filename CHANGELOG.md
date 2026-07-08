@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added `RandomForegroundBiasedCrop` (spatial family): fixed-size crop with nnU-Net-style class-balanced foreground oversampling — the last `round(B * fg_percent)` samples of each batch are centered on a random pixel of a random foreground class (clamped to bounds); remaining samples and foreground-free/mask-less batches behave exactly like `RandomSpatialCrop`, RNG stream included.
+- Added `RandomForegroundBiasedCrop` (spatial family): fixed-size crop with nnU-Net-style class-balanced foreground oversampling — the last `round(B * fg_percent)` samples of each batch are centered on a random pixel of a random foreground class (clamped to bounds); remaining samples and foreground-free/mask-less batches behave exactly like `RandomSpatialCrop`, RNG stream included. `fg_labels` restricts which labels count as foreground (default `> 0`); `probabilistic=True` switches the forced subset to an independent per-sample Bernoulli draw (required for batch size 1, where the deterministic rule rounds to zero forced samples, and usable as a stochastic 50/50 augmentation).
 
 ## 0.3.3 - 2026-07-17
 

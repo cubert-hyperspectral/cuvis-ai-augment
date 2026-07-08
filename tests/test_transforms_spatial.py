@@ -313,3 +313,61 @@ class TestRandomForegroundBiasedCrop:
             RandomForegroundBiasedCrop(size=(4, 4), fg_percent=1.5)
         with pytest.raises(ValueError, match="size"):
             RandomForegroundBiasedCrop(size=(0, 4))
+
+    def test_fg_labels_restricts_eligible_classes(self, make_cube):
+        # Label 1 covers a large region but is declared background via
+        # fg_labels=[2]; the forced sample must center on the single class-2
+        # pixel in the far corner, not on any class-1 pixel.
+        cube, mask = make_cube(batch_size=2, height=16, width=16)
+        mask.zero_()
+        mask[:, :8, :] = 1
+        mask[:, 15, 15] = 2
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=1.0, fg_labels=[2])
+        for seed in range(8):
+            _, out_mask = t(cube, mask, _rng(seed))
+            assert (out_mask == 2).any(dim=-1).any(dim=-1).all()
+
+    def test_fg_labels_all_background_falls_back(self, make_cube):
+        # Every present label excluded by fg_labels -> identical to the
+        # uniform crop, RNG stream included.
+        cube, mask = make_cube(batch_size=4, height=16, width=16)
+        mask.fill_(1)
+        a = RandomForegroundBiasedCrop(size=(8, 8), fg_percent=1.0, fg_labels=[7])(
+            cube, mask, _rng(5)
+        )
+        b = RandomSpatialCrop(size=(8, 8))(cube, mask, _rng(5))
+        assert torch.equal(a[0], b[0])
+        assert torch.equal(a[1], b[1])
+
+    def test_probabilistic_batch_one(self, make_cube):
+        # Deterministic mode at B=1: round(1 * 0.33) == 0 -> never forced.
+        # Probabilistic mode with fg_percent=1.0 forces every sample even at B=1.
+        cube, mask = make_cube(batch_size=1, height=16, width=16)
+        mask.zero_()
+        mask[0, 0, 0] = 3
+        det = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.33, prob=0.0)
+        _, det_mask = det(cube, mask, _rng())
+        assert not (det_mask == 3).any()  # centre crop, no forcing at B=1
+        prob_t = RandomForegroundBiasedCrop(
+            size=(4, 4), fg_percent=1.0, prob=0.0, probabilistic=True
+        )
+        _, prob_mask = prob_t(cube, mask, _rng())
+        assert (prob_mask == 3).any()
+
+    def test_probabilistic_mixes_forced_and_uniform(self, make_cube):
+        # fg_percent=0.5 probabilistic over a large batch: some crops contain
+        # the corner fg pixel (forced), some do not (uniform on a 16x16 with a
+        # 4x4 window rarely hits the corner).
+        cube, mask = make_cube(batch_size=64, height=16, width=16)
+        mask.zero_()
+        mask[:, 0, 0] = 1
+        t = RandomForegroundBiasedCrop(
+            size=(4, 4), fg_percent=0.5, prob=1.0, probabilistic=True
+        )
+        _, out_mask = t(cube, mask, _rng(0))
+        contains = (out_mask == 1).any(dim=-1).any(dim=-1)
+        assert contains.any() and (~contains).any()
+
+    def test_fg_labels_validation(self):
+        with pytest.raises(ValueError, match="fg_labels"):
+            RandomForegroundBiasedCrop(size=(4, 4), fg_labels=[])
