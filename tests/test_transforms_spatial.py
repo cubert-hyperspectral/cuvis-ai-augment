@@ -361,9 +361,7 @@ class TestRandomForegroundBiasedCrop:
         cube, mask = make_cube(batch_size=64, height=16, width=16)
         mask.zero_()
         mask[:, 0, 0] = 1
-        t = RandomForegroundBiasedCrop(
-            size=(4, 4), fg_percent=0.5, prob=1.0, probabilistic=True
-        )
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.5, prob=1.0, probabilistic=True)
         _, out_mask = t(cube, mask, _rng(0))
         contains = (out_mask == 1).any(dim=-1).any(dim=-1)
         assert contains.any() and (~contains).any()

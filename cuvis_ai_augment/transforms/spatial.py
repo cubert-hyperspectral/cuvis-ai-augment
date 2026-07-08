@@ -358,17 +358,17 @@ class RandomForegroundBiasedCrop(Transform):
             else None
         )
         for b in range(B):
-            t = int(top[b].item())
-            l = int(left[b].item())  # noqa: E741 — `l` is fine for index here
+            top_o = int(top[b].item())
+            left_o = int(left[b].item())
             if mask is not None and bool(forced[b]):
                 fg = self._fg_center(mask[b], rng)
                 if fg is not None:
                     cy, cx = fg
-                    t = min(max(cy - H_out // 2, 0), max_top)
-                    l = min(max(cx - W_out // 2, 0), max_left)
-            cube_out[b] = cube[b, t : t + H_out, l : l + W_out, :]
+                    top_o = min(max(cy - H_out // 2, 0), max_top)
+                    left_o = min(max(cx - W_out // 2, 0), max_left)
+            cube_out[b] = cube[b, top_o : top_o + H_out, left_o : left_o + W_out, :]
             if mask is not None and mask_out is not None:
-                mask_out[b] = mask[b, t : t + H_out, l : l + W_out]
+                mask_out[b] = mask[b, top_o : top_o + H_out, left_o : left_o + W_out]
         return cube_out, mask_out
 
     def _fg_center(self, mask_b: Tensor, rng: torch.Generator) -> tuple[int, int] | None:
