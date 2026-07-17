@@ -16,8 +16,8 @@ dependencies = [
     # Mirrors sibling plugins (dinomaly, sam3, deepeiou): depend only on cuvis-ai-core
     # + cuvis-ai-schemas, never the high-level `cuvis-ai` package (which eagerly imports
     # the proprietary Cuvis SDK at module load).
-    "cuvis-ai-core>=0.10.0",
-    "cuvis-ai-schemas>=0.7.0",
+    "cuvis-ai-core>=0.11.2",
+    "cuvis-ai-schemas>=0.8.0",
     "torch>=2.1",
     "numpy>=1.20.0",
 ]

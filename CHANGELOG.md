@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 - 2026-07-17
+
+- Require `cuvis-ai-schemas>=0.8.0` and `cuvis-ai-core>=0.11.2`, adopting the released cuvis-ai-next framework versions.
+
 ## 0.3.2 - 2026-06-24
 
 - **`AugmentationCompose` no longer silently augments val/test/inference data** (issue #8). The class-level `execution_stages = {ExecutionStage.TRAIN}` declaration was being shadowed by `cuvis_ai_core.node.Node.__init__`'s unconditional write to `self.execution_stages`, leaving the instance with `{ALWAYS}` — so the node ran at every stage and applied random transforms to val/test cubes. Empirically this corrupted pixel-level evaluation (pixel AUROC at val dropped from ~0.97 to ~0.54 in a Dinomaly2 anomaly-detection pipeline). The fix moves TRAIN-only enforcement *inside* `forward` via a Context stage check, keeping the node ALWAYS-routable so cuvis-ai-core's pipeline still wires its output port to downstream consumers. At val/test/inference the node is now a true identity passthrough; `forward` without a Context (standalone unit-test use) still applies transforms.
