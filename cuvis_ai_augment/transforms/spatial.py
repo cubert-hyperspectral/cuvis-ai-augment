@@ -247,8 +247,8 @@ class RandomForegroundBiasedCrop(Transform):
     every batch is forced to contain foreground by centering the crop window
     on a randomly chosen pixel of a randomly chosen eligible foreground class,
     clamped to the image bounds. The subset is the deterministic *last*
-    ``round(B * fg_percent)`` samples (nnU-Net's default) or an independent
-    per-sample Bernoulli draw (``probabilistic=True``). Eligible foreground is
+    ``B - round(B * (1 - fg_percent))`` samples (nnU-Net's ``get_do_oversample`` rule) or an
+    independent per-sample Bernoulli draw (``probabilistic=True``). Eligible foreground is
     ``mask > 0`` by default, or an explicit ``fg_labels`` set. Remaining
     samples crop exactly like ``RandomSpatialCrop``; samples without eligible
     foreground (or when no mask is connected) fall back to the uniform
@@ -260,8 +260,9 @@ class RandomForegroundBiasedCrop(Transform):
         Output ``(H_out, W_out)``. Must satisfy ``H_out <= H`` and ``W_out <= W``.
     fg_percent : float
         Fraction of each batch forced to contain foreground. Deterministic
-        mode forces the **last** ``round(B * fg_percent)`` samples (nnU-Net's
-        rule); probabilistic mode draws Bernoulli(``fg_percent``) per sample.
+        mode forces the **last** ``B - round(B * (1 - fg_percent))`` samples
+        (nnU-Net's ``get_do_oversample`` rule); probabilistic mode draws
+        Bernoulli(``fg_percent``) per sample.
     prob : float
         For the non-forced samples: probability of a random offset; otherwise
         a deterministic centre crop (identical to ``RandomSpatialCrop``).
@@ -273,7 +274,7 @@ class RandomForegroundBiasedCrop(Transform):
         ``False`` (default): deterministic last-k selection, RNG stream
         identical to ``RandomSpatialCrop`` for foreground-free batches.
         ``True``: independent per-sample Bernoulli — use for small batch
-        sizes (``B=1`` deterministic rounds to zero forced samples) and as a
+        sizes (deterministic last-k rounding is coarse at small ``B``) and as a
         stochastic augmentation (e.g. ``fg_percent=0.5`` for a 50/50 mix of
         object-centered and uniform crops).
     """
@@ -345,8 +346,11 @@ class RandomForegroundBiasedCrop(Transform):
         if self.probabilistic:
             forced = torch.rand(B, generator=rng) < self.fg_percent
         else:
-            # nnU-Net rule: the LAST round(B * fg_percent) samples are forced.
-            n_forced = int(round(B * self.fg_percent))
+            # nnU-Net rule (get_do_oversample): sample idx is forced when
+            # idx >= round(B * (1 - fg_percent)), i.e. the last B - round(B * (1 - fg_percent))
+            # samples -- NOT round(B * fg_percent), which disagrees at exact .5 ties under
+            # banker's rounding (e.g. B=5, fg_percent=0.1 forces 1 here, 0 the other way).
+            n_forced = B - int(round(B * (1.0 - self.fg_percent)))
             forced = torch.zeros(B, dtype=torch.bool)
             if n_forced:
                 forced[B - n_forced :] = True

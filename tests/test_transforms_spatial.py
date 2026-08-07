@@ -252,11 +252,23 @@ class TestRandomForegroundBiasedCrop:
         cube[:, 0, 0, :] = 999.0
         t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.33, prob=0.0)
         out_cube, out_mask = t(cube, mask, _rng())
-        # round(3 * 0.33) == 1 -> exactly the last sample is forced.
+        # nnU-Net rule: 3 - round(3 * 0.67) == 1 -> exactly the last sample is forced.
         assert (out_mask[2] == 5).any()
         assert out_cube[2, 0, 0, 0].item() == pytest.approx(999.0)  # paired alignment
         assert not (out_mask[0] == 5).any()  # centre crops miss the corner
         assert not (out_mask[1] == 5).any()
+
+    def test_forced_count_matches_nnunet_rounding(self, make_cube):
+        # The forced count is nnU-Net's B - round(B * (1 - fg_percent)), NOT round(B * fg_percent):
+        # at B=5, fg_percent=0.1 that is 5 - round(4.5) == 1 (banker's round -> 4), so the last
+        # sample is forced -- whereas round(5 * 0.1) rounds to 0 and would force none.
+        cube, mask = make_cube(batch_size=5, height=16, width=16)
+        mask.zero_()
+        mask[:, 0, 0] = 5
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.1, prob=0.0)
+        _, out_mask = t(cube, mask, _rng())
+        assert (out_mask[4] == 5).any()  # last sample forced -> centred on the corner fg
+        assert not any((out_mask[i] == 5).any() for i in range(4))  # first 4 are centre crops
 
     def test_class_balanced_center_choice(self, make_cube):
         # Rare class must be sampled as often as the common one (class-uniform,
@@ -340,7 +352,7 @@ class TestRandomForegroundBiasedCrop:
         assert torch.equal(a[1], b[1])
 
     def test_probabilistic_batch_one(self, make_cube):
-        # Deterministic mode at B=1: round(1 * 0.33) == 0 -> never forced.
+        # Deterministic mode at B=1: 1 - round(1 * 0.67) == 0 -> never forced.
         # Probabilistic mode with fg_percent=1.0 forces every sample even at B=1.
         cube, mask = make_cube(batch_size=1, height=16, width=16)
         mask.zero_()
