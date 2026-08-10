@@ -15,6 +15,7 @@ import torch
 
 from cuvis_ai_augment.transforms.spatial import (
     Random90Rotate,
+    RandomForegroundBiasedCrop,
     RandomHorizontalFlip,
     RandomSpatialCrop,
     RandomVerticalFlip,
@@ -230,3 +231,153 @@ class TestStatisticalApply:
                 n_applied += 1
         fraction = n_applied / n_trials
         assert 0.45 <= fraction <= 0.55, f"Application rate {fraction:.3f} out of bounds."
+
+
+class TestRandomForegroundBiasedCrop:
+    def test_shape_dtype_preserved(self, make_cube):
+        cube, mask = make_cube(height=16, width=16)
+        out_cube, out_mask = RandomForegroundBiasedCrop(size=(8, 8))(cube, mask, _rng())
+        assert out_cube.shape == (2, 8, 8, 8)
+        assert out_cube.dtype == cube.dtype
+        assert out_mask is not None
+        assert out_mask.shape == (2, 8, 8)
+        assert out_mask.dtype == mask.dtype
+
+    def test_forced_last_sample_contains_foreground(self, make_cube):
+        # Single fg pixel in a far corner: a centre crop misses it, the forced
+        # sample's window is centered on it (clamped) and must contain it.
+        cube, mask = make_cube(batch_size=3, height=16, width=16)
+        mask.zero_()
+        mask[:, 0, 0] = 5
+        cube[:, 0, 0, :] = 999.0
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.33, prob=0.0)
+        out_cube, out_mask = t(cube, mask, _rng())
+        # nnU-Net rule: 3 - round(3 * 0.67) == 1 -> exactly the last sample is forced.
+        assert (out_mask[2] == 5).any()
+        assert out_cube[2, 0, 0, 0].item() == pytest.approx(999.0)  # paired alignment
+        assert not (out_mask[0] == 5).any()  # centre crops miss the corner
+        assert not (out_mask[1] == 5).any()
+
+    def test_forced_count_matches_nnunet_rounding(self, make_cube):
+        # The forced count is nnU-Net's B - round(B * (1 - fg_percent)), NOT round(B * fg_percent):
+        # at B=5, fg_percent=0.1 that is 5 - round(4.5) == 1 (banker's round -> 4), so the last
+        # sample is forced -- whereas round(5 * 0.1) rounds to 0 and would force none.
+        cube, mask = make_cube(batch_size=5, height=16, width=16)
+        mask.zero_()
+        mask[:, 0, 0] = 5
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.1, prob=0.0)
+        _, out_mask = t(cube, mask, _rng())
+        assert (out_mask[4] == 5).any()  # last sample forced -> centred on the corner fg
+        assert not any((out_mask[i] == 5).any() for i in range(4))  # first 4 are centre crops
+
+    def test_class_balanced_center_choice(self, make_cube):
+        # Rare class must be sampled as often as the common one (class-uniform,
+        # not pixel-uniform): one pixel of class 2 vs many of class 1.
+        cube, mask = make_cube(batch_size=1, height=16, width=16)
+        mask.zero_()
+        mask[0, :8, :] = 1
+        mask[0, 15, 15] = 2
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=1.0)
+        hits = 0
+        for seed in range(64):
+            _, out_mask = t(cube, mask, _rng(seed))
+            hits += bool((out_mask[0] == 2).any())
+        assert hits > 8  # pixel-uniform would give ~1/129 * 64 < 1 expected hit
+
+    def test_empty_mask_matches_random_spatial_crop(self, make_cube):
+        # No foreground anywhere -> identical RNG stream and output as the
+        # uniform crop, seed for seed.
+        cube, mask = make_cube(batch_size=4, height=16, width=16)
+        mask.zero_()
+        a = RandomForegroundBiasedCrop(size=(8, 8), fg_percent=0.5)(cube, mask, _rng(7))
+        b = RandomSpatialCrop(size=(8, 8))(cube, mask, _rng(7))
+        assert torch.equal(a[0], b[0])
+        assert torch.equal(a[1], b[1])
+
+    def test_fg_percent_zero_matches_random_spatial_crop(self, make_cube):
+        cube, mask = make_cube(batch_size=4, height=16, width=16)
+        a = RandomForegroundBiasedCrop(size=(8, 8), fg_percent=0.0)(cube, mask, _rng(3))
+        b = RandomSpatialCrop(size=(8, 8))(cube, mask, _rng(3))
+        assert torch.equal(a[0], b[0])
+        assert torch.equal(a[1], b[1])
+
+    def test_determinism(self, make_cube):
+        cube, mask = make_cube(batch_size=3)
+        t = RandomForegroundBiasedCrop(size=(8, 8), fg_percent=0.33)
+        out1 = t(cube, mask, _rng(seed=123))
+        out2 = t(cube, mask, _rng(seed=123))
+        assert torch.equal(out1[0], out2[0])
+        assert torch.equal(out1[1], out2[1])
+
+    def test_mask_none_falls_back_uniform(self, make_cube):
+        cube, _ = make_cube(with_mask=False)
+        out_cube, out_mask = RandomForegroundBiasedCrop(size=(8, 8), fg_percent=1.0)(
+            cube, None, _rng()
+        )
+        assert out_cube.shape == (2, 8, 8, 8)
+        assert out_mask is None
+
+    def test_validation_errors(self, make_cube):
+        cube, mask = make_cube(height=8, width=8)
+        with pytest.raises(ValueError, match="exceeds"):
+            RandomForegroundBiasedCrop(size=(16, 16))(cube, mask, _rng())
+        with pytest.raises(ValueError, match="fg_percent"):
+            RandomForegroundBiasedCrop(size=(4, 4), fg_percent=1.5)
+        with pytest.raises(ValueError, match="size"):
+            RandomForegroundBiasedCrop(size=(0, 4))
+
+    def test_fg_labels_restricts_eligible_classes(self, make_cube):
+        # Label 1 covers a large region but is declared background via
+        # fg_labels=[2]; the forced sample must center on the single class-2
+        # pixel in the far corner, not on any class-1 pixel.
+        cube, mask = make_cube(batch_size=2, height=16, width=16)
+        mask.zero_()
+        mask[:, :8, :] = 1
+        mask[:, 15, 15] = 2
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=1.0, fg_labels=[2])
+        for seed in range(8):
+            _, out_mask = t(cube, mask, _rng(seed))
+            assert (out_mask == 2).any(dim=-1).any(dim=-1).all()
+
+    def test_fg_labels_all_background_falls_back(self, make_cube):
+        # Every present label excluded by fg_labels -> identical to the
+        # uniform crop, RNG stream included.
+        cube, mask = make_cube(batch_size=4, height=16, width=16)
+        mask.fill_(1)
+        a = RandomForegroundBiasedCrop(size=(8, 8), fg_percent=1.0, fg_labels=[7])(
+            cube, mask, _rng(5)
+        )
+        b = RandomSpatialCrop(size=(8, 8))(cube, mask, _rng(5))
+        assert torch.equal(a[0], b[0])
+        assert torch.equal(a[1], b[1])
+
+    def test_probabilistic_batch_one(self, make_cube):
+        # Deterministic mode at B=1: 1 - round(1 * 0.67) == 0 -> never forced.
+        # Probabilistic mode with fg_percent=1.0 forces every sample even at B=1.
+        cube, mask = make_cube(batch_size=1, height=16, width=16)
+        mask.zero_()
+        mask[0, 0, 0] = 3
+        det = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.33, prob=0.0)
+        _, det_mask = det(cube, mask, _rng())
+        assert not (det_mask == 3).any()  # centre crop, no forcing at B=1
+        prob_t = RandomForegroundBiasedCrop(
+            size=(4, 4), fg_percent=1.0, prob=0.0, probabilistic=True
+        )
+        _, prob_mask = prob_t(cube, mask, _rng())
+        assert (prob_mask == 3).any()
+
+    def test_probabilistic_mixes_forced_and_uniform(self, make_cube):
+        # fg_percent=0.5 probabilistic over a large batch: some crops contain
+        # the corner fg pixel (forced), some do not (uniform on a 16x16 with a
+        # 4x4 window rarely hits the corner).
+        cube, mask = make_cube(batch_size=64, height=16, width=16)
+        mask.zero_()
+        mask[:, 0, 0] = 1
+        t = RandomForegroundBiasedCrop(size=(4, 4), fg_percent=0.5, prob=1.0, probabilistic=True)
+        _, out_mask = t(cube, mask, _rng(0))
+        contains = (out_mask == 1).any(dim=-1).any(dim=-1)
+        assert contains.any() and (~contains).any()
+
+    def test_fg_labels_validation(self):
+        with pytest.raises(ValueError, match="fg_labels"):
+            RandomForegroundBiasedCrop(size=(4, 4), fg_labels=[])

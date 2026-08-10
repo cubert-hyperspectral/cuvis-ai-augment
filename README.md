@@ -73,7 +73,7 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 |---|---|---|---|
 | `inputs.cube` | `torch.float32` | `(B, H, W, C)` | Required. |
 | `inputs.mask` | `torch.int32`   | `(B, H, W)`    | Optional; paired transforms apply the same per-sample decision. |
-| `outputs.cube`| `torch.float32` | `(B, H, W, C)` | Same shape as input *except* under `RandomSpatialCrop` (H, W shrink to `size`). |
+| `outputs.cube`| `torch.float32` | `(B, H, W, C)` | Same shape as input *except* under the crop transforms (`RandomSpatialCrop`, `RandomForegroundBiasedCrop`: H, W shrink to `size`). |
 | `outputs.mask`| `torch.int32`   | `(B, H, W)`    | Present iff `mask` was connected. |
 
 **hparams:**
@@ -97,6 +97,7 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 | `RandomVerticalFlip`   | Flip height axis with probability `prob` per sample |
 | `Random90Rotate`       | Rotate by random multiple of 90° (0/90/180/270) per sample. Requires `H == W` when any sample's k is odd. |
 | `RandomSpatialCrop`    | Crop to fixed `(H_out, W_out)` at random offset per sample (centre crop when `prob<1`). |
+| `RandomForegroundBiasedCrop` | `RandomSpatialCrop` plus nnU-Net-style foreground oversampling: a `fg_percent` subset of each batch is centered on a random pixel of a random foreground class (`mask > 0`, or `fg_labels`). Foreground-free/mask-less samples fall back to the uniform crop. |
 
 ### Spectral (`cuvis_ai_augment.transforms.spectral`) — new in v0.2.0
 
@@ -123,8 +124,8 @@ Discover programmatically:
 from cuvis_ai_augment.node.compose import AugmentationCompose
 AugmentationCompose.available_transforms()
 # ['Cutout', 'GaussianBandNoise', 'MultiplicativeIlluminationScaling',
-#  'Random90Rotate', 'RandomBandDropout', 'RandomHorizontalFlip',
-#  'RandomSpatialCrop', 'RandomVerticalFlip']
+#  'Random90Rotate', 'RandomBandDropout', 'RandomForegroundBiasedCrop',
+#  'RandomHorizontalFlip', 'RandomSpatialCrop', 'RandomVerticalFlip']
 ```
 
 ### References
