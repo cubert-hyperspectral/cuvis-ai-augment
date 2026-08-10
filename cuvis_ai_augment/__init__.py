@@ -1,6 +1,7 @@
 """cuvis-ai-augment: data-augmentation plugin for cuvis.ai."""
 
 from cuvis_ai_augment.node.compose import AugmentationCompose
+from cuvis_ai_augment.node.crop import Crop
 from cuvis_ai_augment.transforms import (
     TRANSFORM_REGISTRY,
     Transform,
@@ -10,6 +11,7 @@ from cuvis_ai_augment.transforms import (
 
 __all__ = [
     "AugmentationCompose",
+    "Crop",
     "TRANSFORM_REGISTRY",
     "Transform",
     "build_transform",
