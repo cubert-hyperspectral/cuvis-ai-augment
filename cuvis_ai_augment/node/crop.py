@@ -8,10 +8,13 @@ stage (train, val, test, inference). It is therefore a standalone Node registere
 ``execution_stages={ALWAYS}`` with **no** internal stage gate — cropping a
 val/test cube is exactly the intended behavior, not something to short-circuit.
 
-Bounds follow Python slice semantics: ``data[:, top:bottom, left:right, :]``.
-``None`` means open-ended, so the defaults (``top=0, bottom=None, left=0,
-right=None``) are an identity passthrough. When a ``mask`` port is connected it is
-cropped with the *same* rectangle so the cube/mask pair stays aligned.
+Bounds select ``data[:, top:bottom, left:right, :]``; ``None`` means open-ended,
+so the defaults (``top=0, bottom=None, left=0, right=None``) are an identity
+passthrough. Unlike raw Python slicing, the bounds are validated against the
+actual frame at ``forward``: a rectangle that exceeds (or falls entirely outside)
+the data raises ``ValueError`` instead of being silently clipped to a smaller —
+or empty — result. When a ``mask`` port is connected its spatial shape must match
+the cube's and it is cropped with the *same* rectangle so the pair stays aligned.
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PortSpec
 from torch import Tensor
 
+from cuvis_ai_augment.transforms.base import validate_cube_mask_shapes
+
 
 class Crop(Node):
     """Deterministic fixed-rectangle crop of a ``[B, H, W, C]`` cube (and paired mask).
@@ -32,11 +37,13 @@ class Crop(Node):
     Parameters
     ----------
     top, bottom : int or None
-        Row bounds, Python-slice semantics (``H`` axis). ``top`` defaults to 0,
-        ``bottom`` to ``None`` (frame height). Kept rows are ``[top:bottom]``.
+        Row bounds (``H`` axis). ``top`` defaults to 0, ``bottom`` to ``None``
+        (frame height). Kept rows are ``[top:bottom]``. ``forward`` raises
+        ``ValueError`` when ``bottom`` exceeds the actual frame height or the
+        resolved rectangle is empty — bounds are never silently clipped.
     left, right : int or None
-        Column bounds, Python-slice semantics (``W`` axis). ``left`` defaults to 0,
-        ``right`` to ``None`` (frame width). Kept columns are ``[left:right]``.
+        Column bounds (``W`` axis). ``left`` defaults to 0, ``right`` to ``None``
+        (frame width). Kept columns are ``[left:right]``, validated the same way.
 
     Notes
     -----
@@ -103,11 +110,31 @@ class Crop(Node):
         context: Context | None = None,
         **_: Any,
     ) -> dict[str, Tensor]:
+        # Same cube/mask contract checks every Transform in this plugin performs
+        # (4-D cube, 3-D mask, matching spatial shapes) — shared helper, same messages.
+        validate_cube_mask_shapes(data, mask)
+
+        # Python slicing silently clips out-of-range indices, which would mask a
+        # misconfigured rectangle (or return an empty tensor whose failure only
+        # surfaces downstream). Validate the resolved bounds against the actual
+        # frame and refuse, mirroring RandomSpatialCrop's size-vs-frame check.
+        _, H, W, _ = data.shape
+        bottom = self.bottom if self.bottom is not None else H
+        right = self.right if self.right is not None else W
+        if bottom > H or right > W:
+            raise ValueError(
+                f"Crop bounds exceed the data: bottom={bottom}, right={right} vs "
+                f"frame (H={H}, W={W}). Bounds are not silently clipped."
+            )
+        if self.top >= bottom or self.left >= right:
+            raise ValueError(
+                f"Crop rectangle is empty for this frame: rows [{self.top}:{bottom}], "
+                f"cols [{self.left}:{right}] on (H={H}, W={W})."
+            )
+
         out: dict[str, Tensor] = {
-            "cropped": data[:, self.top : self.bottom, self.left : self.right, :].contiguous()
+            "cropped": data[:, self.top : bottom, self.left : right, :].contiguous()
         }
         if mask is not None:
-            out["mask_cropped"] = mask[
-                :, self.top : self.bottom, self.left : self.right
-            ].contiguous()
+            out["mask_cropped"] = mask[:, self.top : bottom, self.left : right].contiguous()
         return out

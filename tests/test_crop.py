@@ -96,6 +96,56 @@ def test_invalid_bounds_raise(kwargs: dict) -> None:
         Crop(**kwargs)
 
 
+def test_bounds_exceeding_frame_raise() -> None:
+    # Python slicing would silently clip bottom=500 on H=300 and return all 300
+    # rows, masking the config error — the node must reject it instead.
+    node = Crop(top=0, bottom=500)
+    with pytest.raises(ValueError, match="exceed the data"):
+        node.forward(data=torch.rand(1, 300, 100, 4))
+
+
+def test_empty_crop_on_frame_raises() -> None:
+    # bottom=500 exceeds H=300 → rejected by the bounds check (silent slicing
+    # would instead return an empty [B, 0, W, C] tensor).
+    node = Crop(top=350, bottom=500)
+    with pytest.raises(ValueError, match="exceed the data"):
+        node.forward(data=torch.rand(1, 300, 100, 4))
+
+
+def test_open_ended_empty_crop_raises() -> None:
+    # bottom=None resolves to H=300; top=350 then yields an empty rectangle.
+    node = Crop(top=350)
+    with pytest.raises(ValueError, match="empty"):
+        node.forward(data=torch.rand(1, 300, 100, 4))
+
+
+def test_right_exceeding_width_raises() -> None:
+    node = Crop(left=0, right=200)
+    with pytest.raises(ValueError, match="exceed the data"):
+        node.forward(data=torch.rand(1, 300, 100, 4))
+
+
+def test_bounds_equal_to_frame_are_valid() -> None:
+    # bottom == H and right == W select exactly to the edge — must NOT raise.
+    node = Crop(top=13, bottom=300, left=30, right=100)
+    out = node.forward(data=torch.rand(1, 300, 100, 4))
+    assert out["cropped"].shape == (1, 287, 70, 4)
+
+
+def test_mask_spatial_mismatch_raises() -> None:
+    node = Crop(top=1, bottom=4)
+    cube = torch.rand(2, 10, 12, 3)
+    mask = torch.randint(0, 2, (2, 10, 11), dtype=torch.int32)  # W mismatch
+    with pytest.raises(ValueError, match="spatial shapes must match"):
+        node.forward(data=cube, mask=mask)
+
+
+def test_non_4d_data_raises() -> None:
+    node = Crop()
+    with pytest.raises(ValueError, match="4-D"):
+        node.forward(data=torch.rand(10, 12, 3))
+
+
 @pytest.mark.integration
 def test_manifest_resolves_crop() -> None:
     from cuvis_ai_core.utils.node_registry import NodeRegistry
