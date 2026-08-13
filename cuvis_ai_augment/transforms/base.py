@@ -67,6 +67,25 @@ def build_transform(spec: dict[str, Any]) -> Transform:
     return cls(**spec)
 
 
+def validate_cube_mask_shapes(cube: Tensor, mask: Tensor | None) -> None:
+    """Raise if ``cube`` / ``mask`` don't match the documented contract.
+
+    Shared by :class:`Transform` (via :meth:`Transform._validate_shapes`) and by
+    standalone nodes that operate on the same cube/mask pair (e.g. ``node.crop.Crop``),
+    so both families reject malformed input with identical messages.
+    """
+    if cube.ndim != 4:
+        raise ValueError(f"cube must be 4-D (B, H, W, C); got shape {tuple(cube.shape)}.")
+    if mask is not None:
+        if mask.ndim != 3:
+            raise ValueError(f"mask must be 3-D (B, H, W); got shape {tuple(mask.shape)}.")
+        if mask.shape[:3] != cube.shape[:3]:
+            raise ValueError(
+                f"cube/mask spatial shapes must match. "
+                f"cube={tuple(cube.shape[:3])}, mask={tuple(mask.shape[:3])}."
+            )
+
+
 class Transform(ABC):
     """Abstract base for augmentation transforms.
 
@@ -135,16 +154,7 @@ class Transform(ABC):
     @staticmethod
     def _validate_shapes(cube: Tensor, mask: Tensor | None) -> None:
         """Raise if ``cube`` / ``mask`` don't match the documented contract."""
-        if cube.ndim != 4:
-            raise ValueError(f"cube must be 4-D (B, H, W, C); got shape {tuple(cube.shape)}.")
-        if mask is not None:
-            if mask.ndim != 3:
-                raise ValueError(f"mask must be 3-D (B, H, W); got shape {tuple(mask.shape)}.")
-            if mask.shape[:3] != cube.shape[:3]:
-                raise ValueError(
-                    f"cube/mask spatial shapes must match. "
-                    f"cube={tuple(cube.shape[:3])}, mask={tuple(mask.shape[:3])}."
-                )
+        validate_cube_mask_shapes(cube, mask)
 
     @staticmethod
     def _validate_wavelengths(cube: Tensor, wavelengths: list[float] | None) -> None:

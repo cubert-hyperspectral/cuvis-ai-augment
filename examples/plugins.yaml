@@ -3,3 +3,4 @@ name: augment
 path: ".."
 capabilities:
   - class_name: cuvis_ai_augment.node.compose.AugmentationCompose
+  - class_name: cuvis_ai_augment.node.crop.Crop

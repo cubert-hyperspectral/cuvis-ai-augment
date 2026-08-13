@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `Crop` node (`cuvis_ai_augment.node.crop.Crop`): a deterministic fixed-rectangle spatial crop of a `[B, H, W, C]` cube and its optional paired `[B, H, W]` mask. Bounds use Python-slice semantics (`data[:, top:bottom, left:right, :]`) with `None` meaning open-ended, so the defaults are an identity passthrough. Unlike the stochastic crops inside `AugmentationCompose` (TRAIN-only), `Crop` is a standalone preprocessing node registered `execution_stages={ALWAYS}` with no internal stage gate — a deterministic crop is meant to apply identically at train/val/test/inference. Cropped outputs are returned `.contiguous()`. Constructor validates `bottom > top`, `right > left`, and non-negative `top`/`left`.
 - Added `RandomForegroundBiasedCrop` (spatial family): fixed-size crop with nnU-Net-style class-balanced foreground oversampling — the last `B - round(B * (1 - fg_percent))` samples of each batch (nnU-Net's `get_do_oversample` rule) are centered on a random pixel of a random foreground class (clamped to bounds); remaining samples and foreground-free/mask-less batches behave exactly like `RandomSpatialCrop`, RNG stream included. `fg_labels` restricts which labels count as foreground (default `> 0`); `probabilistic=True` switches the forced subset to an independent per-sample Bernoulli draw (required for batch size 1, where the deterministic rule rounds to zero forced samples, and usable as a stochastic 50/50 augmentation).
 
 ## 0.3.3 - 2026-07-17
