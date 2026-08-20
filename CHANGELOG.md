@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-08-20
+
+- Documented the torch cu128 index tables as local-development-only: installs of this package as a git or registry dependency never read them, the committed lock is resolved without these sources, and composed child environments mirror the host's torch build (cuvis-ai-core >= 0.12.1).
+
 ## 0.4.0 - 2026-08-13
 
 - Added `Crop` node (`cuvis_ai_augment.node.crop.Crop`): a deterministic fixed-rectangle spatial crop of a `[B, H, W, C]` cube and its optional paired `[B, H, W]` mask. Bounds use Python-slice semantics (`data[:, top:bottom, left:right, :]`) with `None` meaning open-ended, so the defaults are an identity passthrough. Unlike the stochastic crops inside `AugmentationCompose` (TRAIN-only), `Crop` is a standalone preprocessing node registered `execution_stages={ALWAYS}` with no internal stage gate — a deterministic crop is meant to apply identically at train/val/test/inference. Cropped outputs are returned `.contiguous()`. Constructor validates `bottom > top`, `right > left`, and non-negative `top`/`left`.
