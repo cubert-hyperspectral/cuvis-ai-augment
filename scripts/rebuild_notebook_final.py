@@ -451,7 +451,7 @@ cells.append(
 ## 13 · Takeaways
 
 - **No-op outside training.** `AugmentationCompose` stays in the executable graph at
-  every stage (`execution_stages={ALWAYS}`) and short-circuits to an identity passthrough
+  every stage (`EXECUTION_STAGES = {ALWAYS}`) and short-circuits to an identity passthrough
   at val/test/inference, so there is no need to remove it from your pipeline YAML for
   those runs.
 - **Seed once at the Node** — `seed:` on `AugmentationCompose` drives the shared

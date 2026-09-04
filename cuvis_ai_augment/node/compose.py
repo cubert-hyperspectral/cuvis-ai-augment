@@ -5,7 +5,7 @@ its paired mask) in order. Augmentations are sequenced via this node's ``transfo
 hparam rather than via separate pipeline edges, matching the
 albumentations / torchvision.transforms.v2 / Kornia idiom.
 
-The node is registered as ``execution_stages={ALWAYS}`` so cuvis-ai-core keeps it in
+The node keeps the class default ``EXECUTION_STAGES = {ALWAYS}`` so cuvis-ai-core keeps it in
 the executable graph at every stage. TRAIN-only behavior is enforced *internally* in
 ``forward`` via a Context stage check: at val/test/inference it short-circuits to
 identity (cube and mask passed through unchanged). This delivers the documented
@@ -15,7 +15,6 @@ identity (cube and mask passed through unchanged). This delivers the documented
 from __future__ import annotations
 
 import importlib
-import warnings
 from typing import Any
 
 import torch
@@ -97,20 +96,10 @@ class AugmentationCompose(Node):
     }
 
     # TRAIN-only behavior is enforced inside ``forward`` (Context stage check), NOT
-    # via cuvis-ai-core's ``execution_stages`` filter, for two reasons:
-    #
-    # 1. ``Node.__init__`` writes ``self.execution_stages`` from a kwarg (defaulting
-    #    to ``{ALWAYS}``) on every instance, *unconditionally* — a class-level
-    #    declaration here would be silently shadowed at construction time and never
-    #    reach ``should_execute``. Empirically verified (see issue #8).
-    #
-    # 2. Even if the class attribute were honored, cuvis-ai-core's pipeline reacts
-    #    to a filtered node by removing it from the executable set entirely (no
-    #    passthrough routing). Downstream consumers that subscribed to our output
-    #    port would then crash with ``missing required input``. Keeping the node
-    #    ALWAYS-routable and short-circuiting to identity in ``forward`` is the
-    #    only way to deliver the "no-op at val/test/inference" behavior without a
-    #    cuvis-ai-core change.
+    # via cuvis-ai-core's stage filter: the pipeline drops a filtered node from the
+    # executable set entirely (no passthrough routing), so downstream consumers of
+    # our output ports would fail with ``missing required input``. The class keeps
+    # the ``EXECUTION_STAGES = {ALWAYS}`` default and short-circuits to identity.
     def __init__(
         self,
         transforms: list[dict[str, Any]] | None = None,
@@ -125,22 +114,6 @@ class AugmentationCompose(Node):
         self.wavelengths: list[float] | None = (
             [float(w) for w in wavelengths] if wavelengths is not None else None
         )
-
-        # ALWAYS-routable: node stays in the executable graph at all stages; stage
-        # gating happens inside forward(). Callers can override by passing
-        # execution_stages= explicitly, but that re-introduces the routing issue
-        # described above (use at your own risk), so warn loudly to keep it from being silent.
-        explicit_stages = kwargs.get("execution_stages")
-        if explicit_stages is not None and set(explicit_stages) != {ExecutionStage.ALWAYS}:
-            warnings.warn(
-                "AugmentationCompose was given an explicit execution_stages="
-                f"{explicit_stages!r}. Any non-ALWAYS set filters this node out of the "
-                "pipeline at non-matching stages, leaving downstream consumers of its "
-                "output ports without a producer. The node is designed to stay "
-                "ALWAYS-routable and gate transforms internally; override at your own risk.",
-                stacklevel=2,
-            )
-        kwargs.setdefault("execution_stages", {ExecutionStage.ALWAYS})
 
         super().__init__(
             transforms=self.transforms_spec,
