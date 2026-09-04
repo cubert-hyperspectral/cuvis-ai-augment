@@ -44,19 +44,6 @@ def test_execution_stages_always_routable_by_default():
     assert node.should_execute(ExecutionStage.INFERENCE) is True
 
 
-def test_execution_stages_respect_explicit_override():
-    # Callers can still pass execution_stages= explicitly; we honor it but warn,
-    # because it re-introduces the filter-then-no-route issue and is not recommended.
-    with pytest.warns(UserWarning, match="execution_stages"):
-        node = AugmentationCompose(
-            transforms=[],
-            seed=0,
-            execution_stages={ExecutionStage.TRAIN},
-        )
-    assert node.execution_stages == {ExecutionStage.TRAIN}
-    assert node.should_execute(ExecutionStage.VAL) is False
-
-
 def test_forward_is_identity_outside_train(make_cube):
     # At val/test/inference, forward must return cube/mask byte-identical to the
     # inputs even if non-trivial transforms are configured. This is the contract

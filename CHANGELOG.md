@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 - 2026-09-04
+
+- `AugmentationCompose` relies on the class default `EXECUTION_STAGES = {ALWAYS}` (cuvis-ai-core 0.14.1 honors class-level declarations) and no longer injects or warns about an `execution_stages=` constructor argument; stage gating stays inside `forward`. Floors `cuvis-ai-core>=0.14.1`.
+
 ## 0.4.2 - 2026-08-31
 
 - Scoped the torch cu128 index pin to a `cuda` dependency group (installed by default in this checkout). This corrects 0.4.1's claim that the tables were local-development-only: uv DOES read a git dependency's `[tool.uv.sources]`, so the unscoped pin leaked into every composed child environment pulling this plugin from git and collided with the host-mirrored torch index there (cu130 on a Jetson Thor host). Consumers never install a dependency's groups, so the scoped pin binds nothing outside this checkout. The committed lock now resolves torch from the cu128 index; CI drops `--no-sources` from its `--locked` invocations accordingly. On an aarch64 checkout, sync without the pin: `uv sync --no-default-groups`.

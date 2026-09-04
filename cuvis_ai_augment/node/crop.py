@@ -4,8 +4,8 @@ The stochastic counterparts in this plugin (``RandomSpatialCrop``,
 ``RandomForegroundBiasedCrop``) live inside :class:`AugmentationCompose` and only
 run at TRAIN. ``Crop`` is different: it is a *deterministic* preprocessing op that
 selects a fixed sub-rectangle of every frame, so it must run identically at every
-stage (train, val, test, inference). It is therefore a standalone Node registered
-``execution_stages={ALWAYS}`` with **no** internal stage gate — cropping a
+stage (train, val, test, inference). It is therefore a standalone Node on the class
+default ``EXECUTION_STAGES = {ALWAYS}`` with **no** internal stage gate — cropping a
 val/test cube is exactly the intended behavior, not something to short-circuit.
 
 Bounds select ``data[:, top:bottom, left:right, :]``; ``None`` means open-ended,
