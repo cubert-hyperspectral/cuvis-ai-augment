@@ -212,3 +212,40 @@ def test_seed_determinism(make_cube):
     o2 = n2.forward(cube=cube, mask=mask)
     assert torch.equal(o1["cube"], o2["cube"])
     assert torch.equal(o1["mask"], o2["mask"])
+
+
+def test_samples_per_input_grows_every_output_at_train_only(make_cube):
+    # The crop multiplies the batch: every port the node hands on carries B * N rows (the
+    # wavelengths hparam is per band, not per sample), and every transform after the crop works
+    # on the grown batch. Outside TRAIN the node stays an identity, so val/test keep B frames.
+    from cuvis_ai_schemas.execution import Context
+
+    cube, mask = make_cube(batch_size=2, height=16, width=16, channels=8)
+    node = AugmentationCompose(
+        transforms=[
+            {
+                "type": "RandomForegroundBiasedCrop",
+                "size": [8, 8],
+                "samples_per_input": 3,
+                "fg_percent": 0.5,
+                "probabilistic": True,
+            },
+            {"type": "RandomHorizontalFlip", "prob": 0.5},
+            {"type": "RandomVerticalFlip", "prob": 0.5},
+            {"type": "Random90Rotate", "prob": 0.5},
+            {"type": "RandomSpatialCrop", "size": [6, 6]},
+            {"type": "GaussianBandNoise", "sigma": 0.01, "prob": 0.5},
+            {"type": "RandomBandDropout", "drop_fraction": 0.25, "prob": 0.5},
+            {"type": "MultiplicativeIlluminationScaling", "prob": 0.5},
+            {"type": "Cutout", "patch_size": 2, "prob": 0.5},
+        ],
+        seed=0,
+    )
+    out = node.forward(cube=cube, mask=mask, context=Context(stage=ExecutionStage.TRAIN))
+    assert set(out) == {"cube", "mask"}
+    assert out["cube"].shape == (6, 6, 6, 8)
+    assert out["mask"].shape == (6, 6, 6)
+    for stage in (ExecutionStage.VAL, ExecutionStage.TEST, ExecutionStage.INFERENCE):
+        held = node.forward(cube=cube, mask=mask, context=Context(stage=stage))
+        assert held["cube"].shape == cube.shape
+        assert held["mask"].shape == mask.shape

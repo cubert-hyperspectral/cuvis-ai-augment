@@ -277,6 +277,20 @@ class RandomForegroundBiasedCrop(Transform):
         sizes (deterministic last-k rounding is coarse at small ``B``) and as a
         stochastic augmentation (e.g. ``fg_percent=0.5`` for a 50/50 mix of
         object-centered and uniform crops).
+    samples_per_input : int
+        Crops taken from every input sample (default 1). ``B`` inputs give
+        ``B * samples_per_input`` crops, the crops of input ``b`` at positions
+        ``b * N`` to ``b * N + N - 1``, each with its own offset and its own
+        foreground draw. This is MONAI's ``num_samples`` pattern
+        (``RandCropByPosNegLabeld``): the data module hands each frame over once
+        and the crops multiply here, where core's ``samples_per_frame`` repeats
+        the frame in the loader and reads it once per crop. Statistics nodes
+        (normalizers) belong upstream of the augmentation node, so they see
+        whole frames, as they do at inference. In deterministic mode the
+        nnU-Net rule applies per input when ``N > 1``: the last
+        ``N - round(N * (1 - fg_percent))`` crops of every input are forced.
+        Only the augmentation node's outputs grow to ``B * N``; a per-sample
+        tensor that reaches a later node by another edge keeps ``B`` rows.
     """
 
     def __init__(
@@ -286,6 +300,7 @@ class RandomForegroundBiasedCrop(Transform):
         prob: float = 1.0,
         fg_labels: list[int] | None = None,
         probabilistic: bool = False,
+        samples_per_input: int = 1,
         **kwargs: Any,
     ) -> None:
         super().__init__(prob=prob, **kwargs)
@@ -294,12 +309,16 @@ class RandomForegroundBiasedCrop(Transform):
             raise ValueError(f"size must be a pair of positive ints, got {size!r}")
         if not 0.0 <= float(fg_percent) <= 1.0:
             raise ValueError(f"fg_percent must be in [0, 1], got {fg_percent!r}")
+        n = int(samples_per_input)
+        if n != samples_per_input or n < 1:
+            raise ValueError(f"samples_per_input must be an int >= 1, got {samples_per_input!r}")
         self.size: tuple[int, int] = (size_t[0], size_t[1])
         self.fg_percent = float(fg_percent)
         self.fg_labels = None if fg_labels is None else [int(x) for x in fg_labels]
         if self.fg_labels is not None and len(self.fg_labels) == 0:
             raise ValueError("fg_labels must be None or a non-empty list of labels")
         self.probabilistic = bool(probabilistic)
+        self.samples_per_input = n
 
     def __call__(
         self,
@@ -321,31 +340,33 @@ class RandomForegroundBiasedCrop(Transform):
         device = cube.device
         max_top = H - H_out
         max_left = W - W_out
+        n = self.samples_per_input
+        crops = B * n  # n == 1: one crop per sample, every draw below as before
 
-        # Base offsets for every sample — identical to RandomSpatialCrop.
-        random_apply = self._draw_apply_mask(B, rng, device)
+        # Base offsets for every crop — identical to RandomSpatialCrop.
+        random_apply = self._draw_apply_mask(crops, rng, device)
         if max_top > 0:
-            rand_top = torch.randint(low=0, high=max_top + 1, size=(B,), generator=rng).to(
+            rand_top = torch.randint(low=0, high=max_top + 1, size=(crops,), generator=rng).to(
                 device=device
             )
         else:
-            rand_top = torch.zeros(B, dtype=torch.long, device=device)
+            rand_top = torch.zeros(crops, dtype=torch.long, device=device)
         if max_left > 0:
-            rand_left = torch.randint(low=0, high=max_left + 1, size=(B,), generator=rng).to(
+            rand_left = torch.randint(low=0, high=max_left + 1, size=(crops,), generator=rng).to(
                 device=device
             )
         else:
-            rand_left = torch.zeros(B, dtype=torch.long, device=device)
-        centre_top = torch.full((B,), max_top // 2, dtype=torch.long, device=device)
-        centre_left = torch.full((B,), max_left // 2, dtype=torch.long, device=device)
+            rand_left = torch.zeros(crops, dtype=torch.long, device=device)
+        centre_top = torch.full((crops,), max_top // 2, dtype=torch.long, device=device)
+        centre_left = torch.full((crops,), max_left // 2, dtype=torch.long, device=device)
         top = torch.where(random_apply, rand_top, centre_top)
         left = torch.where(random_apply, rand_left, centre_left)
 
-        # Which samples are forced to contain foreground. Drawn AFTER the base
+        # Which crops are forced to contain foreground. Drawn AFTER the base
         # offsets so deterministic mode keeps the RandomSpatialCrop RNG stream.
         if self.probabilistic:
-            forced = torch.rand(B, generator=rng) < self.fg_percent
-        else:
+            forced = torch.rand(crops, generator=rng) < self.fg_percent
+        elif n == 1:
             # nnU-Net rule (get_do_oversample): sample idx is forced when
             # idx >= round(B * (1 - fg_percent)), i.e. the last B - round(B * (1 - fg_percent))
             # samples -- NOT round(B * fg_percent), which disagrees at exact .5 ties under
@@ -354,25 +375,34 @@ class RandomForegroundBiasedCrop(Transform):
             forced = torch.zeros(B, dtype=torch.bool)
             if n_forced:
                 forced[B - n_forced :] = True
+        else:
+            # The same rule over the crops of every input, so each input gets its share
+            # of forced crops instead of the last inputs of the batch taking all of them.
+            n_forced = n - int(round(n * (1.0 - self.fg_percent)))
+            per_input = torch.zeros(B, n, dtype=torch.bool)
+            if n_forced:
+                per_input[:, n - n_forced :] = True
+            forced = per_input.reshape(crops)
 
-        cube_out = torch.empty((B, H_out, W_out, C), dtype=cube.dtype, device=device)
+        cube_out = torch.empty((crops, H_out, W_out, C), dtype=cube.dtype, device=device)
         mask_out = (
-            torch.empty((B, H_out, W_out), dtype=mask.dtype, device=device)
+            torch.empty((crops, H_out, W_out), dtype=mask.dtype, device=device)
             if mask is not None
             else None
         )
-        for b in range(B):
-            top_o = int(top[b].item())
-            left_o = int(left[b].item())
-            if mask is not None and bool(forced[b]):
+        for j in range(crops):
+            b = j // n  # the input this crop comes from; the input itself is never copied
+            top_o = int(top[j].item())
+            left_o = int(left[j].item())
+            if mask is not None and bool(forced[j]):
                 fg = self._fg_center(mask[b], rng)
                 if fg is not None:
                     cy, cx = fg
                     top_o = min(max(cy - H_out // 2, 0), max_top)
                     left_o = min(max(cx - W_out // 2, 0), max_left)
-            cube_out[b] = cube[b, top_o : top_o + H_out, left_o : left_o + W_out, :]
+            cube_out[j] = cube[b, top_o : top_o + H_out, left_o : left_o + W_out, :]
             if mask is not None and mask_out is not None:
-                mask_out[b] = mask[b, top_o : top_o + H_out, left_o : left_o + W_out]
+                mask_out[j] = mask[b, top_o : top_o + H_out, left_o : left_o + W_out]
         return cube_out, mask_out
 
     def _fg_center(self, mask_b: Tensor, rng: torch.Generator) -> tuple[int, int] | None:
