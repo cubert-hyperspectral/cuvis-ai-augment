@@ -381,3 +381,125 @@ class TestRandomForegroundBiasedCrop:
     def test_fg_labels_validation(self):
         with pytest.raises(ValueError, match="fg_labels"):
             RandomForegroundBiasedCrop(size=(4, 4), fg_labels=[])
+
+
+# ---------------------------------------------------------------- samples_per_input
+def _frames(batch_size: int = 2, height: int = 48, width: int = 64, channels: int = 3):
+    """Input ``b`` is filled with the value ``b``, so a crop shows which input it came from."""
+    return (
+        torch.arange(batch_size, dtype=torch.float32)
+        .view(batch_size, 1, 1, 1)
+        .expand(batch_size, height, width, channels)
+        .clone()
+    )
+
+
+def _one_fg_pixel_per_frame():
+    mask = torch.zeros(2, 48, 64, dtype=torch.int32)
+    mask[0, 5, 7] = 3
+    mask[1, 40, 55] = 3
+    return mask
+
+
+def _golden_inputs():
+    """Cube values encode ``b * 10000 + h * 100 + w``: a crop's first pixel names its window."""
+    b = torch.arange(3).view(3, 1, 1, 1)
+    h = torch.arange(20).view(1, 20, 1, 1)
+    w = torch.arange(24).view(1, 1, 24, 1)
+    cube = (b * 10000 + h * 100 + w).float().expand(3, 20, 24, 2).clone()
+    mask = torch.zeros(3, 20, 24, dtype=torch.int32)
+    mask[0, 2, 3] = 1
+    mask[0, 15, 20] = 2
+    mask[1, 10, 1] = 1
+    return cube, mask  # input 2 has no foreground
+
+
+_GOLDEN_CONFIGS = [
+    {"size": (6, 8), "fg_percent": 0.33, "prob": 1.0},
+    {"size": (6, 8), "fg_percent": 0.5, "prob": 0.5, "probabilistic": True},
+    {"size": (6, 8), "fg_percent": 1.0, "prob": 0.0, "fg_labels": [2]},
+    {"size": (6, 8), "fg_percent": 0.66, "prob": 0.7},
+]
+# Recorded with the transform before samples_per_input existed:
+# (config, seed, with mask, first pixel of every crop, the RNG's next draw after the call).
+_GOLDEN = [
+    (0, 0, True, [1416, 10902, 20800], 0.4900934100151062),
+    (0, 0, False, [1416, 10902, 20800], 0.4900934100151062),
+    (0, 1, True, [1008, 11414, 20907], 0.3971373438835144),
+    (0, 1, False, [1008, 11414, 20907], 0.3971373438835144),
+    (0, 2, True, [305, 11208, 21103], 0.44253265857696533),
+    (0, 2, False, [305, 11208, 21103], 0.44253265857696533),
+    (1, 0, True, [16, 10700, 20906], 0.2938884496688843),
+    (1, 0, False, [16, 10708, 20906], 0.022325754165649414),
+    (1, 1, True, [0, 11316, 21305], 0.46354562044143677),
+    (1, 1, False, [708, 11316, 21305], 0.6826140880584717),
+    (1, 2, True, [1216, 10815, 20708], 0.5333684086799622),
+    (1, 2, False, [708, 10815, 20708], 0.39005082845687866),
+    (2, 0, True, [1216, 10708, 20708], 0.455627977848053),
+    (2, 0, False, [708, 10708, 20708], 0.4900934100151062),
+    (2, 1, True, [1216, 10708, 20708], 0.5695084929466248),
+    (2, 1, False, [708, 10708, 20708], 0.3971373438835144),
+    (2, 2, True, [1216, 10708, 20708], 0.6141571998596191),
+    (2, 2, False, [708, 10708, 20708], 0.44253265857696533),
+    (3, 0, True, [16, 10700, 20906], 0.40171730518341064),
+    (3, 0, False, [16, 10708, 20906], 0.6323062777519226),
+    (3, 1, True, [708, 10700, 21305], 0.524665892124176),
+    (3, 1, False, [708, 11316, 21305], 0.4387779235839844),
+    (3, 2, True, [914, 10700, 20900], 0.5332289338111877),
+    (3, 2, False, [914, 10815, 20900], 0.05732768774032593),
+]
+
+
+class TestRandomForegroundBiasedCropSamplesPerInput:
+    def test_shapes_and_each_crop_comes_from_its_input(self):
+        t = RandomForegroundBiasedCrop(size=(16, 16), samples_per_input=4, probabilistic=True)
+        out_cube, out_mask = t(_frames(), _one_fg_pixel_per_frame(), _rng())
+        assert out_cube.shape == (8, 16, 16, 3)
+        assert out_mask is not None and out_mask.shape == (8, 16, 16)
+        for j in range(8):
+            assert torch.all(out_cube[j] == j // 4)  # the crops of one input sit next to each other
+
+    @pytest.mark.parametrize("row", _GOLDEN)
+    def test_one_sample_per_input_keeps_the_recorded_crops_and_rng_stream(self, row):
+        config, seed, with_mask, corners, next_draw = row
+        cube, mask = _golden_inputs()
+        g = _rng(seed)
+        t = RandomForegroundBiasedCrop(**_GOLDEN_CONFIGS[config], samples_per_input=1)
+        out_cube, _ = t(cube, mask if with_mask else None, g)
+        assert [int(v) for v in out_cube[:, 0, 0, 0].tolist()] == corners
+        assert float(torch.rand(1, generator=g).item()) == next_draw
+
+    def test_every_crop_draws_its_own_offset(self):
+        cube = torch.zeros(1, 64, 64, 1)
+        cube[0, :, :, 0] = torch.arange(64 * 64, dtype=torch.float32).view(64, 64)
+        t = RandomForegroundBiasedCrop(size=(8, 8), samples_per_input=6, fg_percent=0.0)
+        out_cube, _ = t(cube, None, _rng(1))
+        corners = {float(out_cube[j, 0, 0, 0]) for j in range(6)}
+        assert len(corners) > 1
+
+    def test_forced_crops_contain_their_inputs_foreground(self):
+        t = RandomForegroundBiasedCrop(
+            size=(16, 16), samples_per_input=4, fg_percent=1.0, probabilistic=True
+        )
+        _, out_mask = t(_frames(), _one_fg_pixel_per_frame(), _rng())
+        assert out_mask is not None
+        assert all(bool((out_mask[j] == 3).any()) for j in range(8))
+
+    def test_deterministic_forcing_applies_per_input(self):
+        # prob=0 makes the unforced crops centre crops, which miss both pixels; the last half
+        # of every input's crops is forced onto that input's foreground.
+        t = RandomForegroundBiasedCrop(size=(16, 16), samples_per_input=4, fg_percent=0.5, prob=0.0)
+        _, out_mask = t(_frames(), _one_fg_pixel_per_frame(), _rng())
+        assert out_mask is not None
+        hits = [bool((out_mask[j] == 3).any()) for j in range(8)]
+        assert hits == [False, False, True, True] * 2
+
+    def test_without_a_mask(self):
+        t = RandomForegroundBiasedCrop(size=(16, 16), samples_per_input=4, probabilistic=True)
+        out_cube, out_mask = t(_frames(), None, _rng())
+        assert out_cube.shape == (8, 16, 16, 3) and out_mask is None
+
+    @pytest.mark.parametrize("bad", [0, -2, 1.5])
+    def test_rejects_bad_samples_per_input(self, bad):
+        with pytest.raises(ValueError, match="samples_per_input"):
+            RandomForegroundBiasedCrop(size=(16, 16), samples_per_input=bad)

@@ -73,8 +73,8 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 |---|---|---|---|
 | `inputs.cube` | `torch.float32` | `(B, H, W, C)` | Required. |
 | `inputs.mask` | `torch.int32`   | `(B, H, W)`    | Optional; paired transforms apply the same per-sample decision. |
-| `outputs.cube`| `torch.float32` | `(B, H, W, C)` | Same shape as input *except* under the crop transforms (`RandomSpatialCrop`, `RandomForegroundBiasedCrop`: H, W shrink to `size`). |
-| `outputs.mask`| `torch.int32`   | `(B, H, W)`    | Present iff `mask` was connected. |
+| `outputs.cube`| `torch.float32` | `(B, H, W, C)` | Same shape as input *except* under the crop transforms (`RandomSpatialCrop`, `RandomForegroundBiasedCrop`: H, W shrink to `size`; `RandomForegroundBiasedCrop` with `samples_per_input=N` also turns B into B * N). |
+| `outputs.mask`| `torch.int32`   | `(B, H, W)`    | Present iff `mask` was connected; cropped and multiplied like the cube. |
 
 **hparams:**
 
@@ -87,6 +87,14 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 
 **Execution:** the node is registered as `execution_stages = {ALWAYS}` so cuvis-ai-core keeps it in the executable graph at every stage. TRAIN-only behavior is enforced *inside* `forward` via a `Context` stage check: at val/test/inference the node short-circuits to identity (cube and mask pass through unchanged), so downstream consumers always have a producer for the output ports without breaking eval determinism.
 
+**Several crops per frame, read once:** `RandomForegroundBiasedCrop(samples_per_input=N)` is MONAI's
+`num_samples` pattern (`RandCropByPosNegLabeld`). The data module hands every frame over once and the
+crops multiply inside the graph, so a step sees `batch_size * N` crops; cuvis-ai-core's
+`samples_per_frame` gives the same crops per epoch by repeating each frame in the loader, which reads
+the whole frame once per crop. Keep statistics nodes (normalizers) upstream of this node, so they see
+whole frames as at inference. Only this node's outputs grow to `B * N`: a per-sample tensor that reaches
+a later node by another edge keeps `B` rows.
+
 ## Available transforms (v0.2.0)
 
 ### Spatial (`cuvis_ai_augment.transforms.spatial`)
@@ -97,7 +105,7 @@ spatial decision to both the cube and the mask so the pair stays aligned.
 | `RandomVerticalFlip`   | Flip height axis with probability `prob` per sample |
 | `Random90Rotate`       | Rotate by random multiple of 90° (0/90/180/270) per sample. Requires `H == W` when any sample's k is odd. |
 | `RandomSpatialCrop`    | Crop to fixed `(H_out, W_out)` at random offset per sample (centre crop when `prob<1`). |
-| `RandomForegroundBiasedCrop` | `RandomSpatialCrop` plus nnU-Net-style foreground oversampling: a `fg_percent` subset of each batch is centered on a random pixel of a random foreground class (`mask > 0`, or `fg_labels`). Foreground-free/mask-less samples fall back to the uniform crop. |
+| `RandomForegroundBiasedCrop` | `RandomSpatialCrop` plus nnU-Net-style foreground oversampling: a `fg_percent` subset of each batch is centered on a random pixel of a random foreground class (`mask > 0`, or `fg_labels`). Foreground-free/mask-less samples fall back to the uniform crop. `samples_per_input=N` takes N crops from every input (B inputs give B * N crops, each with its own offset and foreground draw). |
 
 ### Spectral (`cuvis_ai_augment.transforms.spectral`) — new in v0.2.0
 

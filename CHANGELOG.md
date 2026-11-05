@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 - 2026-11-05
+
+- `RandomForegroundBiasedCrop` takes `samples_per_input` (default 1): N foreground-biased crops from every input sample, so `B` inputs give `B * N` crops with the crops of one input next to each other, each with its own offset and its own foreground draw. This is MONAI's `num_samples` pattern: the data module hands each frame over once and the crops multiply inside the graph, where cuvis-ai-core's `samples_per_frame` repeats the frame in the loader and reads it once per crop. In deterministic mode the nnU-Net rule applies per input for `N > 1` (the last `N - round(N * (1 - fg_percent))` crops of every input are forced). `samples_per_input=1` keeps the crops and the RNG stream of 0.4.3 bit for bit. Statistics nodes stay upstream of `AugmentationCompose`, so they see whole frames.
+
 ## 0.4.3 - 2026-09-04
 
 - `AugmentationCompose` relies on the class default `EXECUTION_STAGES = {ALWAYS}` (cuvis-ai-core 0.14.1 honors class-level declarations) and no longer injects or warns about an `execution_stages=` constructor argument; stage gating stays inside `forward`. Floors `cuvis-ai-core>=0.14.1`.
